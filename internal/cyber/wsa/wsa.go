@@ -1,4 +1,3 @@
-// Package wsa — Website Security Auditing.
 package wsa
 
 import (
@@ -10,59 +9,50 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brezzkin-dev/CINT/internal/cyber/core"
+	core "github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
-
-var secHeaders = map[string]struct {
-	Sev core.Severity
-	Msg string
-}{
-	"Strict-Transport-Security": {core.SevHigh, "HSTS missing — SSL-strip feasible"},
-	"Content-Security-Policy":   {core.SevMed, "CSP missing — XSS mitigation weak"},
-	"X-Frame-Options":           {core.SevMed, "clickjacking possible"},
-	"X-Content-Type-Options":    {core.SevLow, "MIME sniffing possible"},
-	"Referrer-Policy":           {core.SevLow, "referrer leakage"},
-	"Permissions-Policy":        {core.SevLow, "browser feature access unrestricted"},
-}
-
-var commonPaths = []string{
-	"/.git/HEAD", "/.git/config", "/.env", "/server-status",
-	"/phpinfo.php", "/admin", "/.DS_Store", "/backup.zip",
-	"/swagger.json", "/openapi.json", "/actuator/health",
-}
-
-var techSigs = map[string][]string{
-	"nginx":      {"Server: nginx"},
-	"apache":     {"Server: Apache"},
-	"cloudflare": {"Server: cloudflare", "cf-ray"},
-	"iis":        {"Server: Microsoft-IIS"},
-	"php":        {"X-Powered-By: PHP"},
-	"aspnet":     {"X-AspNet-Version", "X-Powered-By: ASP.NET"},
-	"express":    {"X-Powered-By: Express"},
-	"wordpress":  {"wp-content", "wp-includes"},
-	"drupal":     {"Drupal.settings", "X-Generator: Drupal"},
-	"react":      {"__NEXT_DATA__", "data-reactroot"},
-}
-
-func auditTLS(host string) *tls.ConnectionState {
-	cfg := &tls.Config{InsecureSkipVerify: true, ServerName: host}
-	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 10 * time.Second}, "tcp", host+":443", cfg)
-	if err != nil {
-		return nil
-	}
-	defer conn.Close()
-	state := conn.ConnectionState()
-	return &state
-}
 
 type Options struct {
 	Inject   bool
 	Takeover bool
 }
 
+var secHeaders = map[string]struct {
+	Sev core.Severity
+	Msg string
+}{
+	"Strict-Transport-Security": {core.SevHigh, "HSTS missing"},
+	"Content-Security-Policy":   {core.SevMed, "CSP missing"},
+	"X-Frame-Options":           {core.SevMed, "clickjacking possible"},
+	"X-Content-Type-Options":    {core.SevLow, "MIME sniffing possible"},
+	"Referrer-Policy":           {core.SevLow, "referrer leakage"},
+	"Permissions-Policy":        {core.SevLow, "browser feature access unrestricted"},
+}
+
+var wafSigs = map[string][]string{
+	"Cloudflare":  {"cloudflare", "cf-ray"},
+	"Akamai":      {"akamai", "akamaighost"},
+	"AWS WAF":     {"awselb", "x-amz-cf-id"},
+	"Imperva":     {"incap_ses", "visid_incap"},
+	"F5 BIG-IP":   {"bigipserver", "x-wa-info"},
+	"Sucuri":      {"sucuri", "x-sucuri-id"},
+	"ModSecurity": {"mod_security", "modsecurity"},
+}
+
+func auditTLS(host string) *tls.ConnectionState {
+	cfg := &tls.Config{InsecureSkipVerify: true, ServerName: host}
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", host+":443", cfg)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+	st := conn.ConnectionState()
+	return &st
+}
+
 func Audit(ctx context.Context, target string, opts Options) *core.Result {
 	r := core.NewResult("wsa", target)
-
 	if !strings.HasPrefix(target, "http") {
 		target = "https://" + target
 	}
@@ -80,7 +70,6 @@ func Audit(ctx context.Context, target string, opts Options) *core.Result {
 		return r
 	}
 	r.AddExtra("status", status)
-	r.AddExtra("final_url", target)
 	r.AddExtra("body_size", len(body))
 
 	lcHeaders := map[string]string{}
@@ -90,21 +79,17 @@ func Audit(ctx context.Context, target string, opts Options) *core.Result {
 
 	for name, cfg := range secHeaders {
 		if _, ok := lcHeaders[strings.ToLower(name)]; !ok {
-			r.Add(core.Finding{
-				Tool: "wsa", Severity: cfg.Sev,
-				Title:  "Missing header: " + name,
-				Detail: cfg.Msg,
-			})
+			r.Add(core.Finding{Tool: "wsa", Severity: cfg.Sev,
+				Title: "Missing header: " + name, Detail: cfg.Msg})
 		}
 	}
 
-	if csp, ok := lcHeaders["content-security-policy"]; ok {
-		if strings.Contains(csp, "unsafe-inline") || strings.Contains(csp, "unsafe-eval") {
-			r.Add(core.Finding{
-				Tool: "wsa", Severity: core.SevMed,
-				Title:  "Weak CSP",
-				Detail: "contains 'unsafe-inline' or 'unsafe-eval'",
-			})
+	for waf, sigs := range wafSigs {
+		for _, sig := range sigs {
+			if strings.Contains(strings.ToLower(fmtHeaders(headers)), sig) {
+				r.AddExtra("waf", waf)
+				break
+			}
 		}
 	}
 
@@ -124,9 +109,10 @@ func Audit(ctx context.Context, target string, opts Options) *core.Result {
 	if state := auditTLS(u.Hostname()); state != nil {
 		r.AddExtra("tls_version", tlsVersionString(state.Version))
 		r.AddExtra("cipher_suite", tls.CipherSuiteName(state.CipherSuite))
+		r.AddExtra("tls_verified", false)
 		if state.Version < tls.VersionTLS12 {
-			r.Add(core.Finding{Tool: "wsa", Severity: core.SevHigh, Title: "Weak TLS",
-				Detail: tlsVersionString(state.Version)})
+			r.Add(core.Finding{Tool: "wsa", Severity: core.SevHigh,
+				Title: "Weak TLS: " + tlsVersionString(state.Version)})
 		}
 		if len(state.PeerCertificates) > 0 {
 			cert := state.PeerCertificates[0]
@@ -139,38 +125,26 @@ func Audit(ctx context.Context, target string, opts Options) *core.Result {
 		}
 	}
 
-	bodyStr := string(body)
-	var tech []string
-	for name, sigs := range techSigs {
-		for _, sig := range sigs {
-			if strings.Contains(bodyStr, sig) || strings.Contains(strings.ToLower(fmtHeaders(headers)), strings.ToLower(sig)) {
-				tech = append(tech, name)
-				break
-			}
-		}
+	if opts.Inject {
+		runInjectionProbes(ctx, u, r)
 	}
-	sort.Strings(tech)
-	r.AddExtra("tech", tech)
+	if opts.Takeover {
+		checkTakeover(u.Hostname(), r)
+	}
 
-	base := u.Scheme + "://" + u.Host
-	seen := map[string]bool{}
-	for _, p := range commonPaths {
-		full := base + p
-		if seen[full] {
-			continue
-		}
-		seen[full] = true
-		st, _, _, _ := core.HTTPGet(ctx, full, nil)
-		if st == 200 {
-			r.Add(core.Finding{
-				Tool: "wsa", Severity: core.SevHigh,
-				Title:  "Sensitive path reachable: " + p,
-				Detail: full,
-			})
-		}
-	}
 	r.Finish()
 	return r
+}
+
+func fmtHeaders(h map[string][]string) string {
+	var b strings.Builder
+	for k, v := range h {
+		b.WriteString(k)
+		b.WriteString(": ")
+		b.WriteString(strings.Join(v, ", "))
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func tlsVersionString(v uint16) string {
@@ -187,13 +161,4 @@ func tlsVersionString(v uint16) string {
 	return "unknown"
 }
 
-func fmtHeaders(h map[string][]string) string {
-	var b strings.Builder
-	for k, v := range h {
-		b.WriteString(k)
-		b.WriteString(": ")
-		b.WriteString(strings.Join(v, ", "))
-		b.WriteString("\n")
-	}
-	return b.String()
-}
+var _ = sort.Strings
