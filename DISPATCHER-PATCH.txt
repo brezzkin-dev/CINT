@@ -1,0 +1,112 @@
+UNIVERSE BATCH 3/5 — DISPATCHER PATCH
+Target: cmd/universe/main.go
+
+Apply these three snippets to the existing file. Do NOT replace main.go with this file.
+
+1) Add these imports inside the existing import block:
+
+t27_domainx "github.com/ollie/phantomfs/internal/universe/tools/t27_domainx"
+t28_identrace "github.com/ollie/phantomfs/internal/universe/tools/t28_identrace"
+t29_mailscope "github.com/ollie/phantomfs/internal/universe/tools/t29_mailscope"
+t30_photontrace "github.com/ollie/phantomfs/internal/universe/tools/t30_photontrace"
+t31_forensix "github.com/ollie/phantomfs/internal/universe/tools/t31_forensix"
+
+2) Add these cases inside the existing dispatch switch:
+
+case "domainx":
+    cmdDomainX(args)
+case "identrace":
+    cmdIDentrace(args)
+case "mailscope":
+    cmdMailScope(args)
+case "photontrace":
+    cmdPhotonTrace(args)
+case "forensix":
+    cmdForenSix(args)
+
+3) Add these handler functions at the appropriate top-level location:
+
+	fs := flag.NewFlagSet("domainx", flag.ExitOnError)
+	domain := fs.String("domain", "", "apex domain")
+	out := fs.String("out", "", "JSON report")
+	_ = fs.Parse(args)
+	if *domain == "" {
+		fmt.Fprintln(os.Stderr, "domainx: -domain required")
+		os.Exit(2)
+	}
+	r, err := t27_domainx.Run(*domain)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	emit(r, *out)
+}
+
+func cmdIDentrace(args []string) {
+	fs := flag.NewFlagSet("identrace", flag.ExitOnError)
+	user := fs.String("user", "", "username")
+	email := fs.String("email", "", "email (optional, for gravatar)")
+	out := fs.String("out", "", "JSON report")
+	_ = fs.Parse(args)
+	if *user == "" && *email == "" {
+		fmt.Fprintln(os.Stderr, "identrace: -user or -email required")
+		os.Exit(2)
+	}
+	r, err := t28_identrace.Run(*user, *email)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	emit(r, *out)
+}
+
+func cmdMailScope(args []string) {
+	fs := flag.NewFlagSet("mailscope", flag.ExitOnError)
+	file := fs.String("file", "", "raw email file (.eml)")
+	out := fs.String("out", "", "JSON report")
+	verify := fs.Bool("verify", true, "verify DKIM/SPF/DMARC")
+	_ = fs.Parse(args)
+	if *file == "" {
+		fmt.Fprintln(os.Stderr, "mailscope: -file required")
+		os.Exit(2)
+	}
+	r, err := t29_mailscope.Run(*file, t29_mailscope.Options{Verify: *verify})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	emit(r, *out)
+}
+
+func cmdPhotonTrace(args []string) {
+	fs := flag.NewFlagSet("photontrace", flag.ExitOnError)
+	url := fs.String("url", "", "image URL")
+	file := fs.String("file", "", "local image")
+	compare := fs.String("compare", "", "second local image (for similarity)")
+	out := fs.String("out", "", "JSON report")
+	_ = fs.Parse(args)
+	r, err := t30_photontrace.Run(t30_photontrace.Options{
+		URL: *url, File: *file, Compare: *compare,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	emit(r, *out)
+}
+
+func cmdForenSix(args []string) {
+	fs := flag.NewFlagSet("forensix", flag.ExitOnError)
+	root := fs.String("root", "", "home dir to scan (default current user)")
+	out := fs.String("out", "", "JSON report")
+	recent := fs.Int("recent-days", 7, "recent files window")
+	_ = fs.Parse(args)
+	r, err := t31_forensix.Run(t31_forensix.Options{
+		Root: *root, RecentDays: *recent,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	emit(r, *out)
+}
