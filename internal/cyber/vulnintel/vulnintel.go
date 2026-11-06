@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ollie/phantomfs/internal/cyber/core"
+	"github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 const (
@@ -46,7 +46,7 @@ var kevCache struct {
 func loadKEV(ctx context.Context) map[string]bool {
 	kevCache.once.Do(func() {
 		kevCache.set = map[string]bool{}
-		status, _, body, err := core.HTTPGet(ctx, kevURL, nil, nil)
+		status, _, body, err := core.HTTPGet(ctx, kevURL, nil)
 		if err != nil || status != 200 {
 			return
 		}
@@ -67,7 +67,7 @@ func loadKEV(ctx context.Context) map[string]bool {
 
 func LookupCVE(ctx context.Context, cveID string) *core.Result {
 	r := core.NewResult("vulnintel", cveID)
-	status, _, body, err := core.HTTPGet(ctx, fmt.Sprintf(nvdURL, cveID), nil, nil)
+	status, _, body, err := core.HTTPGet(ctx, fmt.Sprintf(nvdURL, cveID), nil)
 	if err != nil || status != 200 {
 		r.Add(core.Finding{Tool: "vulnintel", Severity: core.SevHigh,
 			Title: "NVD lookup failed", Detail: fmt.Sprintf("status=%d err=%v", status, err)})
@@ -103,7 +103,7 @@ func LookupCVE(ctx context.Context, cveID string) *core.Result {
 		refs = append(refs, ref.URL)
 	}
 	r.AddExtra("references", refs)
-	if st2, _, b2, _ := core.HTTPGet(ctx, fmt.Sprintf(epssURL, cveID), nil, nil); st2 == 200 {
+	if st2, _, b2, _ := core.HTTPGet(ctx, fmt.Sprintf(epssURL, cveID), nil); st2 == 200 {
 		var ep struct {
 			Data []struct {
 				EPSS string `json:"epss"`

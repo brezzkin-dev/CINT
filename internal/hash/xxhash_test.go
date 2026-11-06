@@ -2,7 +2,8 @@ package hash
 
 import "testing"
 
-// Reference vectors from the xxHash specification (seed 0).
+// Reference vectors from the xxHash specification (xxh64 with seed=0).
+// If this test fails, the algorithm is wrong.
 func TestXXH64Vectors(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -11,6 +12,9 @@ func TestXXH64Vectors(t *testing.T) {
 		{"", 0xef46db3751d8e999},
 		{"a", 0xd24ec4f1a98c6e5b},
 		{"abc", 0x44bc2cf5ad770999},
+		{"1234567890", 0xa9d4d4132eff23b6},
+		{"hi", 0xea8842e9ea2638fa},
+		{"xxhash", 0x32dd38952c4bc720},
 	}
 	for _, c := range cases {
 		got := XXHash64([]byte(c.in), 0)
@@ -44,7 +48,21 @@ func TestStreamingMatchesOneShot(t *testing.T) {
 	}
 }
 
-func BenchmarkXXH64_OneShot(b *testing.B) {
+func TestStreamingReset(t *testing.T) {
+	st := NewXXH64(0)
+	st.Write([]byte("hello"))
+	h1 := st.Sum64()
+
+	st.Reset()
+	st.Write([]byte("hello"))
+	h2 := st.Sum64()
+
+	if h1 != h2 {
+		t.Fatalf("reset didn't restore: %016x != %016x", h1, h2)
+	}
+}
+
+func BenchmarkXXH64OneShot(b *testing.B) {
 	data := make([]byte, 1<<20)
 	b.SetBytes(int64(len(data)))
 	for i := 0; i < b.N; i++ {
@@ -56,6 +74,7 @@ func BenchmarkXXH64_Streaming(b *testing.B) {
 	data := make([]byte, 1<<20)
 	b.SetBytes(int64(len(data)))
 	buf := make([]byte, 64*1024)
+
 	for i := 0; i < b.N; i++ {
 		st := NewXXH64(0)
 		for off := 0; off < len(data); off += len(buf) {

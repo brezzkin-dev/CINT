@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ollie/phantomfs/internal/cyber/core"
+	"github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 var secHeaders = map[string]struct {
@@ -73,7 +73,7 @@ func Audit(ctx context.Context, target string, opts Options) *core.Result {
 		return r
 	}
 
-	status, headers, body, err := core.HTTPGet(ctx, target, nil, nil)
+	status, headers, body, err := core.HTTPGet(ctx, target, nil)
 	if err != nil {
 		r.Add(core.Finding{Tool: "wsa", Severity: core.SevHigh, Title: "fetch failed", Detail: err.Error()})
 		r.Finish()
@@ -160,7 +160,7 @@ func Audit(ctx context.Context, target string, opts Options) *core.Result {
 			continue
 		}
 		seen[full] = true
-		st, _, _, _ := core.HTTPGet(ctx, full, nil, nil)
+		st, _, _, _ := core.HTTPGet(ctx, full, nil)
 		if st == 200 {
 			r.Add(core.Finding{
 				Tool: "wsa", Severity: core.SevHigh,

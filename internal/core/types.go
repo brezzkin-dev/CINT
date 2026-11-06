@@ -42,14 +42,3 @@ type ExtInfo struct {
 	Nlink  uint64
 	Blocks uint64
 }
-
-func Recover(name string) {
-	if r := recover(); r != nil {
-		Errorf("panic in %s: %v", name, r)
-	}
-}
-
-func SafeRun(name string, fn func()) {
-	defer Recover(name)
-	fn()
-}

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ollie/phantomfs/internal/cyber/core"
+	"github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 func findSetuid(r *core.Result, root string) {

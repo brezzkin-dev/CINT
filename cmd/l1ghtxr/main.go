@@ -28,7 +28,7 @@ const (
 	author  = "L1ghtXr"
 )
 
-const banner = `
+var banner = `
    __    _  __     __  __     __  __
   / /   (_)/ /_   / / / /_   / / / /___
  / /   / // __ \ / /_/ / /  / /_/ / __ \

@@ -19,7 +19,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ollie/phantomfs/internal/cyber/core"
+	"github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 func IdentifyHash(h string) (string, string) {

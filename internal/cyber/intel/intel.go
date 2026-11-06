@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ollie/phantomfs/internal/cyber/core"
+	"github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 const (
@@ -31,7 +31,7 @@ type intel struct {
 }
 
 func lookupGeo(ctx context.Context, ip string) map[string]any {
-	status, _, body, err := core.HTTPGet(ctx, fmt.Sprintf(geoAPI, ip), nil, nil)
+	status, _, body, err := core.HTTPGet(ctx, fmt.Sprintf(geoAPI, ip), nil)
 	if err != nil || status != 200 {
 		return nil
 	}
@@ -44,7 +44,7 @@ func lookupGeo(ctx context.Context, ip string) map[string]any {
 
 func lookupURLHaus(ctx context.Context, host string) map[string]any {
 	body := []byte(url.Values{"host": []string{host}}.Encode())
-	status, resp, err := core.HTTPPost(ctx, urlhausHost, "application/x-www-form-urlencoded", body)
+	status, resp, err := core.HTTPPost(ctx, urlhausHost, "application/x-www-form-urlencoded", body, nil)
 	if err != nil || status != 200 {
 		return nil
 	}
@@ -57,7 +57,7 @@ func lookupURLHaus(ctx context.Context, host string) map[string]any {
 
 func lookupThreatFox(ctx context.Context, ioc string) map[string]any {
 	body, _ := json.Marshal(map[string]any{"query": "search_ioc", "search_term": ioc})
-	status, resp, err := core.HTTPPost(ctx, threatfox, "application/json", body)
+	status, resp, err := core.HTTPPost(ctx, threatfox, "application/json", body, nil)
 	if err != nil || status != 200 {
 		return nil
 	}

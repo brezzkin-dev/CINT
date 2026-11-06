@@ -21,7 +21,7 @@ func TestFastCDCEdges(t *testing.T) {
 func TestFastCDCProperties(t *testing.T) {
 	f := NewFastCDC(512, 4096, 65536, 42)
 	r := rand.New(rand.NewSource(7))
-	data := make([]byte, 2<<20) // 2 MiB random
+	data := make([]byte, 2<<20)
 	r.Read(data)
 
 	cuts := f.Cut(data)
@@ -34,7 +34,7 @@ func TestFastCDCProperties(t *testing.T) {
 	prev := 0
 	var st Stats
 	for i, c := range cuts {
-		if c <= prev && i > 0 {
+		if i > 0 && c <= prev {
 			t.Fatalf("cut %d (%d) <= prev (%d)", i, c, prev)
 		}
 		size := c - prev
@@ -71,8 +71,7 @@ func TestFastCDCDeterministic(t *testing.T) {
 }
 
 func TestFastCDCResync(t *testing.T) {
-	// Inserting bytes in the middle should not disturb chunks far
-	// downstream (that's the whole point of CDC).
+	// Inserting bytes mid-stream should not disturb all downstream boundaries.
 	f := NewFastCDC(512, 4096, 65536, 42)
 	r := rand.New(rand.NewSource(13))
 	base := make([]byte, 256*1024)
@@ -87,7 +86,6 @@ func TestFastCDCResync(t *testing.T) {
 	cutsA := f.Cut(base)
 	cutsB := f.Cut(modified)
 
-	// Collect boundaries as byte offsets (excluding final)
 	boundaryA := make(map[int]bool)
 	for _, c := range cutsA[:len(cutsA)-1] {
 		boundaryA[c] = true
@@ -98,7 +96,6 @@ func TestFastCDCResync(t *testing.T) {
 			shared++
 		}
 	}
-	// At least some boundaries should survive the insertion.
 	if shared == 0 {
 		t.Fatalf("no resync: %d boundaries in A, %d in B, 0 shared", len(cutsA), len(cutsB))
 	}

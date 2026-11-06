@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ollie/phantomfs/internal/cyber/core"
+	"github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 var topPorts = []int{
@@ -35,7 +35,7 @@ type service struct {
 
 func crtSH(ctx context.Context, domain string) []string {
 	url := fmt.Sprintf("https://crt.sh/?q=%%25.%s&output=json", domain)
-	status, _, body, err := core.HTTPGet(ctx, url, nil, nil)
+	status, _, body, err := core.HTTPGet(ctx, url, nil)
 	if err != nil || status != 200 {
 		return nil
 	}

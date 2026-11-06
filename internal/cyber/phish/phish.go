@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/ollie/phantomfs/internal/cyber/core"
+	"github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 var suspiciousTLDs = []string{

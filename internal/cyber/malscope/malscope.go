@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ollie/phantomfs/internal/cyber/core"
+	"github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 var reStr = regexp.MustCompile(`[\x20-\x7e]{4,}`)

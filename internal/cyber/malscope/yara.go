@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ollie/phantomfs/internal/cyber/core"
+	"github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 type yaraRule struct {
