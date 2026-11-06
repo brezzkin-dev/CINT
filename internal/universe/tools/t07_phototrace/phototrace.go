@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 type Options struct {
@@ -84,7 +84,7 @@ func Run(path string, opts Options) (*core.Result, error) {
 	}
 
 	ela, err := ELA(path, img)
-	if err == nil {
+	if err == nil && ela != nil {
 		report.ELA = ela
 		r.AddExtra("ela", ela)
 		if ela.AnomalousRatio > 0.15 {

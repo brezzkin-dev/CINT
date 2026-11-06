@@ -11,7 +11,13 @@ type DoubleResult struct {
 	LikelyDouble bool    `json:"likely_double"`
 }
 
+// DetectDoubleJPEG checks whether the AC coefficient distribution shows
+// the "double quantization" pattern — periodic peaks and valleys in the
+// histogram of quantized DCT coefficients.
 func DetectDoubleJPEG(img image.Image, dqt []int) *DoubleResult {
+	if len(dqt) < 64 {
+		return nil
+	}
 	b := img.Bounds()
 	const block = 8
 	var blockACs []float64
@@ -72,12 +78,20 @@ func DetectDoubleJPEG(img image.Image, dqt []int) *DoubleResult {
 			peaks++
 		}
 	}
+	total := 0.0
+	for _, v := range smoothed {
+		total += v
+	}
+	if total < 0.5 {
+		return &DoubleResult{LikelyDouble: false}
+	}
 	ratio := float64(peaks) / 4.0
 	if ratio > 1.0 {
 		ratio = 1.0
 	}
 	return &DoubleResult{
-		PeakRatio: roundf(ratio, 3), Confidence: roundf(ratio, 3),
+		PeakRatio:    roundf(ratio, 3),
+		Confidence:   roundf(ratio, 3),
 		LikelyDouble: peaks >= 2 && ratio >= 0.5,
 	}
 }

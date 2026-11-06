@@ -28,6 +28,10 @@ const (
 	cmMaxRegions = 40
 )
 
+// DetectCopyMove hashes 16x16 blocks and finds duplicate hashes at
+// distant positions. Bounds: max 40 MP pixels, max 250k blocks, per-hash
+// pair cap 20, region cap 40. Oversize images return {Truncated: true}
+// without scanning.
 func DetectCopyMove(img image.Image) *CopyMoveResult {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -46,14 +50,14 @@ func DetectCopyMove(img image.Image) *CopyMoveResult {
 			if len(blocks) >= cmMaxBlocks {
 				goto scan
 			}
-			h := fnv.New64a()
+			hh := fnv.New64a()
 			for yy := 0; yy < bs; yy += 2 {
 				for xx := 0; xx < bs; xx += 2 {
 					r, g, bb, _ := img.At(x+xx, y+yy).RGBA()
-					h.Write([]byte{byte(r >> 8), byte(g >> 8), byte(bb >> 8)})
+					hh.Write([]byte{byte(r >> 8), byte(g >> 8), byte(bb >> 8)})
 				}
 			}
-			blocks = append(blocks, block{x: x, y: y, hash: h.Sum64()})
+			blocks = append(blocks, block{x: x, y: y, hash: hh.Sum64()})
 		}
 	}
 
@@ -65,7 +69,7 @@ scan:
 
 	var regions []Region
 	budget := cmMaxRegions * 4
-	for h, list := range byHash {
+	for hh, list := range byHash {
 		if len(list) < 2 {
 			continue
 		}
@@ -84,7 +88,7 @@ scan:
 					X1: capped[i].x, Y1: capped[i].y,
 					X2: capped[j].x, Y2: capped[j].y,
 					Score: 1.0,
-					Hash:  hashHex(h),
+					Hash:  hashHex(hh),
 				})
 				if len(regions) >= budget {
 					goto emit

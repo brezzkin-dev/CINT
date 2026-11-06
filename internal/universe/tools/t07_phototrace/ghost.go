@@ -24,6 +24,7 @@ func JPEGGhost(img image.Image) []GhostResult {
 	if totalCells < 4 {
 		return nil
 	}
+
 	var out []GhostResult
 	for _, q := range qualities {
 		buf := &bytes.Buffer{}
@@ -65,8 +66,10 @@ func JPEGGhost(img image.Image) []GhostResult {
 			}
 		}
 		out = append(out, GhostResult{
-			Quality: q, AnomalousCells: anomalous, TotalCells: totalCells,
-			MaxCellDiff: roundf(maxDiff, 3),
+			Quality:        q,
+			AnomalousCells: anomalous,
+			TotalCells:     totalCells,
+			MaxCellDiff:    roundf(maxDiff, 3),
 		})
 	}
 	return out

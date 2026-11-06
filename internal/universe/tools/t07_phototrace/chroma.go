@@ -17,6 +17,7 @@ func ChromaticAberration(img image.Image) *ChromaResult {
 	if w < 8 || h < 8 {
 		return nil
 	}
+
 	R := make([][]float64, h)
 	G := make([][]float64, h)
 	B := make([][]float64, h)
@@ -31,6 +32,7 @@ func ChromaticAberration(img image.Image) *ChromaResult {
 			B[y][x] = float64(bb >> 8)
 		}
 	}
+
 	edge := func(ch [][]float64) float64 {
 		var sum float64
 		for y := 1; y < h-1; y++ {
@@ -44,14 +46,21 @@ func ChromaticAberration(img image.Image) *ChromaResult {
 		}
 		return sum
 	}
-	rEdge, gEdge, bEdge := edge(R), edge(G), edge(B)
-	rg, bg := 0.0, 0.0
+
+	rEdge := edge(R)
+	gEdge := edge(G)
+	bEdge := edge(B)
+
+	rg := 0.0
+	bg := 0.0
 	if gEdge > 0.001 {
 		rg = math.Abs(rEdge-gEdge) / gEdge
 		bg = math.Abs(bEdge-gEdge) / gEdge
 	}
+	discrepancy := (rg + bg) / 2
 	return &ChromaResult{
-		RedVsGreenEdge: roundf(rg, 4), BlueVsGreenEdge: roundf(bg, 4),
-		ChannelDiscrepancy: roundf((rg+bg)/2, 4),
+		RedVsGreenEdge:     roundf(rg, 4),
+		BlueVsGreenEdge:    roundf(bg, 4),
+		ChannelDiscrepancy: roundf(discrepancy, 4),
 	}
 }

@@ -27,6 +27,7 @@ func ELA(path string, orig image.Image) (*ELAResult, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	b := orig.Bounds()
 	total := b.Dx() * b.Dy()
 	if total == 0 {
@@ -37,6 +38,7 @@ func ELA(path string, orig image.Image) (*ELAResult, error) {
 	const threshold = 25.0
 	anomalous := 0
 	hist := make([]int, 32)
+
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
 			r1, g1, b1, _ := orig.At(x, y).RGBA()
@@ -59,10 +61,14 @@ func ELA(path string, orig image.Image) (*ELAResult, error) {
 			hist[bucket]++
 		}
 	}
+
 	return &ELAResult{
-		MeanDiff: sum / float64(total), MaxDiff: maxDiff,
-		AnomalousPixels: anomalous, AnomalousRatio: float64(anomalous) / float64(total),
-		Threshold: threshold, Histogram: hist,
+		MeanDiff:        sum / float64(total),
+		MaxDiff:         maxDiff,
+		AnomalousPixels: anomalous,
+		AnomalousRatio:  float64(anomalous) / float64(total),
+		Threshold:       threshold,
+		Histogram:       hist,
 	}, nil
 }
 
@@ -84,6 +90,7 @@ func SaveELAImage(inPath, outPath string) error {
 	if err != nil {
 		return err
 	}
+
 	b := orig.Bounds()
 	outImg := image.NewGray(b)
 	for y := b.Min.Y; y < b.Max.Y; y++ {
@@ -100,6 +107,7 @@ func SaveELAImage(inPath, outPath string) error {
 			outImg.Set(x, y, color.Gray{Y: uint8(amp)})
 		}
 	}
+
 	out, err := os.Create(outPath)
 	if err != nil {
 		return err

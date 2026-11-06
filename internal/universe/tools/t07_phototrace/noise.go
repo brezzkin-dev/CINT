@@ -16,6 +16,7 @@ func NoiseVariance(img image.Image) *NoiseResult {
 	b := img.Bounds()
 	const block = 16
 	var blockVars []float64
+
 	for y := b.Min.Y; y+block <= b.Max.Y; y += block {
 		for x := b.Min.X; x+block <= b.Max.X; x += block {
 			var residuals []float64
@@ -62,6 +63,7 @@ func NoiseVariance(img image.Image) *NoiseResult {
 			blockVars = append(blockVars, variance)
 		}
 	}
+
 	if len(blockVars) == 0 {
 		return nil
 	}
@@ -85,7 +87,9 @@ func NoiseVariance(img image.Image) *NoiseResult {
 		report = report[:200]
 	}
 	return &NoiseResult{
-		BlockVariances: report, MeanVariance: roundf(mean, 4),
-		StdevVariance: roundf(stdev, 4), HeterogeneityScore: roundf(score, 4),
+		BlockVariances:     report,
+		MeanVariance:       roundf(mean, 4),
+		StdevVariance:      roundf(stdev, 4),
+		HeterogeneityScore: roundf(score, 4),
 	}
 }

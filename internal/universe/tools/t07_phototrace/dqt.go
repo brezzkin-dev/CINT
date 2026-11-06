@@ -1,5 +1,7 @@
 package t07_phototrace
 
+// ParseDQT walks JPEG DQT markers and returns the first quantization
+// table (64 entries in zigzag order). Empty slice when not found.
 func ParseDQT(data []byte) []int {
 	for i := 0; i < len(data)-1; i++ {
 		if data[i] != 0xFF || data[i+1] != 0xDB {
