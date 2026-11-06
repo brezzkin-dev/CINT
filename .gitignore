@@ -1,4 +1,3 @@
-# build outputs
 /phantomfs
 /universe
 /obsidian
@@ -6,11 +5,9 @@
 cmd/*/*.exe
 *.test
 
-# runtime data — never commit
 *.json
 !sample*.json
 !package.json
-!go.sum
 vault/
 carved/
 snapshot.phfs
@@ -20,12 +17,9 @@ snapshot.phfs
 *.dmp
 *.raw
 
-# OS noise
 .DS_Store
 Thumbs.db
 *.swp
 *.bak
-
-# IDE
 .vscode/
 .idea/

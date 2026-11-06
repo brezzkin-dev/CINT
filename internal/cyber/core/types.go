@@ -1,4 +1,3 @@
-// Package core provides shared types and helpers for L1ghtXr tools.
 package core
 
 import (
@@ -50,8 +49,7 @@ type Result struct {
 
 func NewResult(tool, target string) *Result {
 	return &Result{
-		Tool:      tool,
-		Target:    target,
+		Tool: tool, Target: target,
 		StartTime: time.Now().UTC().Format(time.RFC3339),
 		Findings:  []Finding{},
 		Extra:     map[string]any{},
@@ -60,8 +58,7 @@ func NewResult(tool, target string) *Result {
 
 func (r *Result) Add(f Finding)            { r.Findings = append(r.Findings, f) }
 func (r *Result) AddExtra(k string, v any) { r.Extra[k] = v }
-
-func (r *Result) Finish() { r.EndTime = time.Now().UTC().Format(time.RFC3339) }
+func (r *Result) Finish()                  { r.EndTime = time.Now().UTC().Format(time.RFC3339) }
 
 func (r *Result) Summary() map[string]any {
 	counts := map[string]int{}
@@ -72,11 +69,7 @@ func (r *Result) Summary() map[string]any {
 			worst = f.Severity
 		}
 	}
-	return map[string]any{
-		"total":  len(r.Findings),
-		"by_sev": counts,
-		"worst":  string(worst),
-	}
+	return map[string]any{"total": len(r.Findings), "by_sev": counts, "worst": string(worst)}
 }
 
 func (r *Result) SaveJSON(path string) error {
@@ -85,4 +78,15 @@ func (r *Result) SaveJSON(path string) error {
 		return err
 	}
 	return os.WriteFile(path, b, 0644)
+}
+
+func Recover(name string) {
+	if r := recover(); r != nil {
+		Errorf("panic in %s: %v", name, r)
+	}
+}
+
+func SafeRun(name string, fn func()) {
+	defer Recover(name)
+	fn()
 }

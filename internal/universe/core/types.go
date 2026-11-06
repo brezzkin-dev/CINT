@@ -2,7 +2,6 @@ package core
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"time"
 )
@@ -83,7 +82,7 @@ func (r *Result) SaveJSON(path string) error {
 
 func Recover(name string) {
 	if r := recover(); r != nil {
-		fmt.Fprintf(os.Stderr, "panic in %s: %v\n", name, r)
+		Errorf("panic in %s: %v", name, r)
 	}
 }
 

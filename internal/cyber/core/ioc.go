@@ -33,7 +33,8 @@ func Classify(s string) IOCType {
 	if s == "" {
 		return IOCUnknown
 	}
-	if strings.HasPrefix(strings.ToLower(s), "http://") || strings.HasPrefix(strings.ToLower(s), "https://") {
+	lower := strings.ToLower(s)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
 		return IOCURL
 	}
 	if ip := net.ParseIP(s); ip != nil {

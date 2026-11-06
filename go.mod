@@ -1,3 +1,3 @@
-module github.com/ollie/phantomfs
+module github.com/brezzkin-dev/CINT
 
 go 1.21
