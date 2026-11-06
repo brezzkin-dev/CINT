@@ -3,7 +3,6 @@ package t07_phototrace
 import (
 	"encoding/binary"
 	"fmt"
-	"math"
 )
 
 // ParseEXIF walks the JPEG APP1 EXIF segment and extracts TIFF IFD tags.
@@ -243,9 +242,4 @@ func walkGPS(tiff []byte, order binary.ByteOrder, off uint32, out map[string]any
 	if len(gpsOut) > 0 {
 		out["GPS"] = gpsOut
 	}
-}
-
-func roundf(f float64, p int) float64 {
-	m := math.Pow(10, float64(p))
-	return math.Round(f*m) / m
 }
