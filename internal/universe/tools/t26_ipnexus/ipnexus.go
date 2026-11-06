@@ -7,10 +7,9 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 const (
@@ -19,37 +18,42 @@ const (
 	torURL  = "https://check.torproject.org/torbulkexitlist"
 )
 
-var (
-	torOnce sync.Once
-	torSet  map[string]bool
-)
+var torCache struct {
+	loaded bool
+	set    map[string]bool
+}
 
 func loadTorExit(ctx context.Context) map[string]bool {
-	torOnce.Do(func() {
-		torSet = map[string]bool{}
-		status, _, body, err := core.HTTPGet(ctx, torURL, nil)
-		if err != nil || status != 200 {
-			return
+	if torCache.loaded {
+		return torCache.set
+	}
+	torCache.set = map[string]bool{}
+	status, _, body, err := core.HTTPGet(ctx, torURL, nil)
+	if err != nil || status != 200 {
+		return torCache.set
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "#") {
+			torCache.set[line] = true
 		}
-		for _, line := range strings.Split(string(body), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				torSet[line] = true
-			}
-		}
-	})
-	return torSet
+	}
+	torCache.loaded = true
+	return torCache.set
 }
 
 func Run(ipStr string) (*core.Result, error) {
 	r := core.NewResult("ipnexus", ipStr)
 	ctx := context.Background()
+
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return r, fmt.Errorf("invalid IP: %s", ipStr)
 	}
+
 	if ip4 := ip.To4(); ip4 != nil {
 		r.AddExtra("version", 4)
+		r.AddExtra("cidr", ip4.String())
 	} else {
 		r.AddExtra("version", 6)
 		if strings.HasPrefix(strings.ToLower(ipStr), "::ffff:") {
@@ -63,17 +67,23 @@ func Run(ipStr string) (*core.Result, error) {
 	if g := lookupGeo(ctx, ipStr); g != nil {
 		r.AddExtra("geo", g)
 		if country, ok := g["country"].(string); ok {
-			r.Add(core.Finding{Tool: "ipnexus", Severity: core.SevInfo,
-				Title: "Geolocation", Detail: fmt.Sprintf("%s, %s — %s", toStr(g["city"]), country, toStr(g["isp"]))})
+			r.Add(core.Finding{
+				Tool: "ipnexus", Severity: core.SevInfo,
+				Title: "Geolocation",
+				Detail: fmt.Sprintf("%s, %s — %s",
+					toStr(g["city"]), country, toStr(g["isp"])),
+			})
 		}
 		if as, ok := g["as"].(string); ok {
 			r.AddExtra("asn", as)
 		}
 		if proxy, ok := g["proxy"].(bool); ok && proxy {
-			r.Add(core.Finding{Tool: "ipnexus", Severity: core.SevHigh, Title: "Proxy/VPN detected"})
+			r.Add(core.Finding{Tool: "ipnexus", Severity: core.SevHigh,
+				Title: "Proxy/VPN detected"})
 		}
 		if hosting, ok := g["hosting"].(bool); ok && hosting {
-			r.Add(core.Finding{Tool: "ipnexus", Severity: core.SevLow, Title: "Datacenter / hosting IP"})
+			r.Add(core.Finding{Tool: "ipnexus", Severity: core.SevLow,
+				Title: "Datacenter / hosting IP"})
 		}
 		if mobile, ok := g["mobile"].(bool); ok && mobile {
 			r.AddExtra("mobile", true)
@@ -102,10 +112,13 @@ func Run(ipStr string) (*core.Result, error) {
 		r.AddExtra("reverse_dns", names)
 	}
 
-	ts := loadTorExit(ctx)
-	if ts[ipStr] {
-		r.Add(core.Finding{Tool: "ipnexus", Severity: core.SevHigh,
-			Title: "Tor exit node", Detail: "IP is a known Tor exit relay"})
+	torSet := loadTorExit(ctx)
+	if torSet[ipStr] {
+		r.Add(core.Finding{
+			Tool: "ipnexus", Severity: core.SevHigh,
+			Title:  "Tor exit node",
+			Detail: "IP is a known Tor exit relay",
+		})
 		r.AddExtra("tor_exit", true)
 	} else {
 		r.AddExtra("tor_exit", false)
@@ -113,7 +126,9 @@ func Run(ipStr string) (*core.Result, error) {
 
 	if cert := grabTLSCert(ipStr); cert != nil {
 		r.AddExtra("tls_cert", cert)
+		r.AddExtra("tls_cert_verified", false)
 	}
+
 	r.Finish()
 	return r, nil
 }
@@ -162,7 +177,7 @@ func cidrSize(start, end string) uint64 {
 
 func grabTLSCert(ip string) map[string]any {
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(ip, "443"),
+	conn, err := tls.DialWithDialer(dialer, "tcp", ip+":443",
 		&tls.Config{InsecureSkipVerify: true})
 	if err != nil {
 		return nil

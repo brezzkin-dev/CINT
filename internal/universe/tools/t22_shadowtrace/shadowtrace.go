@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 type Trace struct {
@@ -20,6 +20,10 @@ type Trace struct {
 	Data   map[string]any `json:"data,omitempty"`
 }
 
+// Run correlates public traces of an identity across independent sources:
+// DNS, CT logs, GitHub code search, crt.sh, gravatar, HackerTarget
+// reverse-IP, and WayBack availability. Every lookup is a real public
+// feed — no auth required.
 func Run(target string) (*core.Result, error) {
 	r := core.NewResult("shadowtrace", target)
 	ctx := context.Background()
@@ -27,9 +31,11 @@ func Run(target string) (*core.Result, error) {
 	if target == "" {
 		return r, fmt.Errorf("empty target")
 	}
+
 	var traces []Trace
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+
 	kind := core.Classify(target)
 	r.AddExtra("kind", string(kind))
 
@@ -41,6 +47,7 @@ func Run(target string) (*core.Result, error) {
 		func() *Trace { return traceGravatar(ctx, target) },
 		func() *Trace { return traceHackerTarget(ctx, target) },
 	}
+
 	for _, fn := range lookups {
 		wg.Add(1)
 		go func(f func() *Trace) {
@@ -66,19 +73,18 @@ func Run(target string) (*core.Result, error) {
 			}
 		}
 		if len(uniq) > 0 {
-			n := len(uniq)
-			if n > 10 {
-				n = 10
-			}
 			r.Add(core.Finding{
 				Tool: "shadowtrace", Severity: core.SevInfo,
-				Title: t.Source, Detail: fmt.Sprintf("%d hits", len(uniq)),
-				Evidence: map[string]any{"hits": uniq[:n]},
+				Title:    t.Source,
+				Detail:   fmt.Sprintf("%d hits", len(uniq)),
+				Evidence: map[string]any{"hits": uniq[:minInt(10, len(uniq))]},
 			})
 		}
 	}
+
 	r.AddExtra("traces", traces)
 	r.AddExtra("unique_hits", len(allHits))
+
 	for h, count := range allHits {
 		if count >= 2 {
 			r.Add(core.Finding{
@@ -88,6 +94,7 @@ func Run(target string) (*core.Result, error) {
 			})
 		}
 	}
+
 	r.Finish()
 	return r, nil
 }
@@ -132,8 +139,8 @@ func traceCT(ctx context.Context, host string) *Trace {
 		return nil
 	}
 	seen := map[string]bool{}
-	for _, row := range raw {
-		for _, line := range strings.Split(row.NameValue, "\n") {
+	for _, r := range raw {
+		for _, line := range strings.Split(r.NameValue, "\n") {
 			line = strings.TrimSpace(strings.TrimPrefix(line, "*."))
 			if line != "" && strings.HasSuffix(line, host) && !seen[line] {
 				seen[line] = true
@@ -206,8 +213,9 @@ func traceGravatar(ctx context.Context, target string) *Trace {
 	if !strings.Contains(target, "@") {
 		return nil
 	}
-	h := md5Hex(strings.ToLower(strings.TrimSpace(target)))
-	url := "https://www.gravatar.com/avatar/" + h + "?d=404"
+	h := md5.Sum([]byte(strings.ToLower(target)))
+	hexHash := hex.EncodeToString(h[:])
+	url := "https://www.gravatar.com/avatar/" + hexHash + "?d=404"
 	status, _, _, _ := core.HTTPGet(ctx, url, nil)
 	if status == 200 {
 		t.Hits = append(t.Hits, url)
@@ -223,7 +231,7 @@ func traceHackerTarget(ctx context.Context, host string) *Trace {
 		return nil
 	}
 	s := string(body)
-	if strings.HasPrefix(s, "error") || strings.Contains(s, "API count exceeded") {
+	if strings.HasPrefix(s, "error") || strings.HasPrefix(s, "API count exceeded") {
 		return nil
 	}
 	for _, line := range strings.Split(s, "\n") {
@@ -238,11 +246,6 @@ func traceHackerTarget(ctx context.Context, host string) *Trace {
 	return t
 }
 
-func md5Hex(s string) string {
-	h := md5.Sum([]byte(s))
-	return hex.EncodeToString(h[:])
-}
-
 func urlEncode(s string) string {
 	var b strings.Builder
 	for _, c := range s {
@@ -253,4 +256,11 @@ func urlEncode(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -10,25 +10,25 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/ollie/phantomfs/internal/cyber/asm"
-	"github.com/ollie/phantomfs/internal/cyber/core"
-	"github.com/ollie/phantomfs/internal/cyber/cryptan"
-	"github.com/ollie/phantomfs/internal/cyber/dfir"
-	"github.com/ollie/phantomfs/internal/cyber/intel"
-	"github.com/ollie/phantomfs/internal/cyber/malscope"
-	"github.com/ollie/phantomfs/internal/cyber/pcap"
-	"github.com/ollie/phantomfs/internal/cyber/phish"
-	"github.com/ollie/phantomfs/internal/cyber/sysaudit"
-	"github.com/ollie/phantomfs/internal/cyber/vulnintel"
-	"github.com/ollie/phantomfs/internal/cyber/wsa"
+	"github.com/brezzkin-dev/CINT/internal/cyber/asm"
+	"github.com/brezzkin-dev/CINT/internal/cyber/core"
+	"github.com/brezzkin-dev/CINT/internal/cyber/cryptan"
+	"github.com/brezzkin-dev/CINT/internal/cyber/dfir"
+	"github.com/brezzkin-dev/CINT/internal/cyber/intel"
+	"github.com/brezzkin-dev/CINT/internal/cyber/malscope"
+	"github.com/brezzkin-dev/CINT/internal/cyber/pcap"
+	"github.com/brezzkin-dev/CINT/internal/cyber/phish"
+	"github.com/brezzkin-dev/CINT/internal/cyber/sysaudit"
+	"github.com/brezzkin-dev/CINT/internal/cyber/vulnintel"
+	"github.com/brezzkin-dev/CINT/internal/cyber/wsa"
 )
 
 const (
-	version = "2.0.0"
+	version = "2.1.0"
 	author  = "L1ghtXr"
 )
 
-var banner = `
+const banner = `
    ____  ____   _____ _____ ____ _____   _   _
   / __ \|  _ \ / ____|_   _|  _ \_   _| | \ | |
  | |  | | |_) | (___   | | | |_) || |   |  \| |
@@ -36,6 +36,7 @@ var banner = `
  | |__| | |_) |____) |_| |_| |_) || |   | |\  |
   \____/|____/|_____/|_____|____/ |_|   |_| \_|
   OBSIDIAN ` + version + ` · author ` + author + ` · ` + runtime.Version() + `
+  10 cyber tools · no AI · no ML
 `
 
 func main() {
@@ -78,7 +79,7 @@ func dispatch(cmd string, args []string) {
 		default:
 			fmt.Fprintf(os.Stderr, "unknown: %s\n", cmd)
 			help()
-			os.Exit(1)
+			os.Exit(2)
 		}
 	})
 }
@@ -89,16 +90,18 @@ func help() {
 author: %s
 usage: obsidian <tool> [flags]
 
-intel      [-file iocs.txt | -ioc a,b,c] [-out r.json]
-malscope   -file sample.bin [-yara custom.yara] [-out r.json]
-dfir       [-root /] [-iocs-only] [-out r.json]
-asm        -domain example.com [-full-ports] [-out r.json]
-wsa        -url https://target [-inject] [-takeover] [-out r.json]
-pcap       -file cap.pcap [-out r.json]
-cryptan    {id|crack|jwt|encrypt|decrypt|freq|xor|vig|rsa|ecb} [flags]
-sysaudit   [-root /] [-out r.json]
-phish      -url https://target [-out r.json]
-vulnintel  {cve|batch|packages} [flags]
+tools:
+  intel        [-file iocs.txt | -ioc ip,domain,hash] [-out report.json]
+  malscope     -file sample.bin [-yara custom.yara] [-out report.json]
+  dfir         [-root /] [-out report.json]
+  asm          -domain example.com [-full-ports] [-out report.json]
+  wsa          -url https://target [-inject] [-takeover] [-out report.json]
+  pcap         -file capture.pcap [-out report.json]
+  cryptan      {id|crack|jwt|encrypt|decrypt|freq} [flags]
+  sysaudit     [-root /] [-out report.json]
+  phish        -url https://suspicious.tld/path [-out report.json]
+  vulnintel    {cve|packages} [flags]
+  version, help
 
 `, author)
 }
@@ -123,13 +126,20 @@ func interactive() {
 func emit(r *core.Result, out string) {
 	r.Finish()
 	if out != "" {
-		_ = r.SaveJSON(out)
+		if err := r.SaveJSON(out); err != nil {
+			fmt.Fprintf(os.Stderr, "save failed: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Fprintf(os.Stderr, "saved: %s\n", out)
 	}
-	b, _ := json.MarshalIndent(map[string]any{
+	b, err := json.MarshalIndent(map[string]any{
 		"tool": r.Tool, "target": r.Target, "author": author,
 		"summary": r.Summary(), "findings": r.Findings, "extra": r.Extra,
 	}, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "marshal failed: %v\n", err)
+		os.Exit(1)
+	}
 	os.Stdout.Write(b)
 	os.Stdout.Write([]byte("\n"))
 }
@@ -142,11 +152,14 @@ func cmdIntel(args []string) {
 	_ = fs.Parse(args)
 	var iocs []string
 	if *file != "" {
-		if b, err := os.ReadFile(*file); err == nil {
-			for _, l := range strings.Split(string(b), "\n") {
-				if l = strings.TrimSpace(l); l != "" {
-					iocs = append(iocs, l)
-				}
+		b, err := os.ReadFile(*file)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		for _, l := range strings.Split(string(b), "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				iocs = append(iocs, l)
 			}
 		}
 	}
@@ -159,7 +172,7 @@ func cmdIntel(args []string) {
 	}
 	if len(iocs) == 0 {
 		fmt.Fprintln(os.Stderr, "intel: -file or -ioc required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	emit(intel.Enrich(context.Background(), iocs), *out)
 }
@@ -172,7 +185,7 @@ func cmdMalscope(args []string) {
 	_ = fs.Parse(args)
 	if *file == "" {
 		fmt.Fprintln(os.Stderr, "malscope: -file required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	r, err := malscope.Analyze(*file, *yaraPath)
 	if err != nil {
@@ -185,7 +198,6 @@ func cmdMalscope(args []string) {
 func cmdDFIR(args []string) {
 	fs := flag.NewFlagSet("dfir", flag.ExitOnError)
 	root := fs.String("root", "/", "root")
-	iocsOnly := fs.Bool("iocs-only", false, "only extract IOCs")
 	out := fs.String("out", "", "JSON report")
 	_ = fs.Parse(args)
 	r, err := dfir.Investigate(*root)
@@ -193,20 +205,7 @@ func cmdDFIR(args []string) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if *iocsOnly {
-		r.Findings = filterFindings(r.Findings, "ioc")
-	}
 	emit(r, *out)
-}
-
-func filterFindings(fs []core.Finding, substr string) []core.Finding {
-	var out []core.Finding
-	for _, f := range fs {
-		if strings.Contains(strings.ToLower(f.Title), substr) {
-			out = append(out, f)
-		}
-	}
-	return out
 }
 
 func cmdASM(args []string) {
@@ -217,7 +216,7 @@ func cmdASM(args []string) {
 	_ = fs.Parse(args)
 	if *domain == "" {
 		fmt.Fprintln(os.Stderr, "asm: -domain required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	emit(asm.Map(context.Background(), *domain, *full), *out)
 }
@@ -231,7 +230,7 @@ func cmdWSA(args []string) {
 	_ = fs.Parse(args)
 	if *url == "" {
 		fmt.Fprintln(os.Stderr, "wsa: -url required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	emit(wsa.Audit(context.Background(), *url, wsa.Options{Inject: *inject, Takeover: *takeover}), *out)
 }
@@ -243,7 +242,7 @@ func cmdPCAP(args []string) {
 	_ = fs.Parse(args)
 	if *file == "" {
 		fmt.Fprintln(os.Stderr, "pcap: -file required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	r, err := pcap.Analyze(*file)
 	if err != nil {
@@ -256,7 +255,7 @@ func cmdPCAP(args []string) {
 func cmdCryptan(args []string) {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "cryptan: {id|crack|jwt|encrypt|decrypt|freq|xor|vig|rsa|ecb}")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	sub, rest := args[0], args[1:]
 	fs := flag.NewFlagSet("cryptan-"+sub, flag.ExitOnError)
@@ -312,7 +311,7 @@ func cmdCryptan(args []string) {
 		}
 		emit(cryptan.BreakVigenere(string(b)), *out)
 	case "rsa":
-		n := fs.String("n", "", "modulus (hex or decimal)")
+		n := fs.String("n", "", "modulus")
 		e := fs.String("e", "65537", "exponent")
 		_ = fs.Parse(rest)
 		emit(cryptan.RSAWeak(*n, *e), *out)
@@ -343,15 +342,15 @@ func cmdPhish(args []string) {
 	_ = fs.Parse(args)
 	if *u == "" {
 		fmt.Fprintln(os.Stderr, "phish: -url required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	emit(phish.Analyze(context.Background(), *u), *out)
 }
 
 func cmdVulnIntel(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "vulnintel: {cve|batch|packages}")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "vulnintel: {cve|packages}")
+		os.Exit(2)
 	}
 	sub, rest := args[0], args[1:]
 	fs := flag.NewFlagSet("vulnintel-"+sub, flag.ExitOnError)
@@ -361,21 +360,6 @@ func cmdVulnIntel(args []string) {
 		id := fs.String("id", "", "CVE ID")
 		_ = fs.Parse(rest)
 		emit(vulnintel.LookupCVE(context.Background(), *id), *out)
-	case "batch":
-		file := fs.String("file", "", "file with CVE IDs")
-		_ = fs.Parse(rest)
-		b, err := os.ReadFile(*file)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		var ids []string
-		for _, l := range strings.Split(string(b), "\n") {
-			if l = strings.TrimSpace(l); l != "" {
-				ids = append(ids, l)
-			}
-		}
-		emit(vulnintel.Batch(context.Background(), ids), *out)
 	case "packages":
 		_ = fs.Parse(rest)
 		emit(vulnintel.ScanPackages(context.Background()), *out)

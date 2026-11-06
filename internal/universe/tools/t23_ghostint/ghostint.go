@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 const (
@@ -32,31 +32,35 @@ type Intel struct {
 	Reasons     []string       `json:"reasons"`
 }
 
-var (
-	feodoOnce sync.Once
-	feodoData []map[string]any
-	feodoErr  error
-	phishOnce sync.Once
-	phishSet  map[string]bool
-)
+type feedCache struct {
+	once sync.Once
+	data []map[string]any
+	err  error
+}
+
+var feodoCache feedCache
+var phishCache struct {
+	once sync.Once
+	set  map[string]bool
+}
 
 func loadFeodo(ctx context.Context) ([]map[string]any, error) {
-	feodoOnce.Do(func() {
+	feodoCache.once.Do(func() {
 		status, _, body, err := core.HTTPGet(ctx, feodoURL, nil)
 		if err != nil || status != 200 {
-			feodoErr = fmt.Errorf("feodo http %d", status)
+			feodoCache.err = fmt.Errorf("feodo http %d", status)
 			return
 		}
-		if err := json.Unmarshal(body, &feodoData); err != nil {
-			feodoErr = err
+		if err := json.Unmarshal(body, &feodoCache.data); err != nil {
+			feodoCache.err = err
 		}
 	})
-	return feodoData, feodoErr
+	return feodoCache.data, feodoCache.err
 }
 
 func loadOpenPhish(ctx context.Context) map[string]bool {
-	phishOnce.Do(func() {
-		phishSet = map[string]bool{}
+	phishCache.once.Do(func() {
+		phishCache.set = map[string]bool{}
 		status, _, body, err := core.HTTPGet(ctx, openphishURL, nil)
 		if err != nil || status != 200 {
 			return
@@ -64,11 +68,11 @@ func loadOpenPhish(ctx context.Context) map[string]bool {
 		for _, line := range strings.Split(string(body), "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" {
-				phishSet[line] = true
+				phishCache.set[line] = true
 			}
 		}
 	})
-	return phishSet
+	return phishCache.set
 }
 
 func Run(iocs []string, feed string) (*core.Result, error) {
@@ -83,17 +87,18 @@ func Run(iocs []string, feed string) (*core.Result, error) {
 		}
 	}
 	r.AddExtra("feodo_count", len(feodoSet))
-	phish := loadOpenPhish(ctx)
-	r.AddExtra("openphish_count", len(phish))
+
+	phishSet := loadOpenPhish(ctx)
+	r.AddExtra("openphish_count", len(phishSet))
 
 	if feed == "feodo" || feed == "all" {
-		r.AddExtra("feodo_sample", firstN(feodoList, 20))
+		r.AddExtra("feodo_sample", firstN(feodoList, 50))
 	}
 	if feed == "openphish" || feed == "all" {
-		keys := make([]string, 0, 20)
-		for k := range phish {
+		keys := make([]string, 0, len(phishSet))
+		for k := range phishSet {
 			keys = append(keys, k)
-			if len(keys) >= 20 {
+			if len(keys) >= 50 {
 				break
 			}
 		}
@@ -102,7 +107,8 @@ func Run(iocs []string, feed string) (*core.Result, error) {
 
 	if len(iocs) == 0 {
 		r.Add(core.Finding{Tool: "ghostint", Severity: core.SevInfo,
-			Title: fmt.Sprintf("Bulk feed: %d feodo, %d phish", len(feodoSet), len(phish))})
+			Title: fmt.Sprintf("Bulk feed loaded: %d feodo, %d phish",
+				len(feodoSet), len(phishSet))})
 		r.Finish()
 		return r, nil
 	}
@@ -111,6 +117,7 @@ func Run(iocs []string, feed string) (*core.Result, error) {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 6)
+
 	for _, raw := range iocs {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
@@ -121,7 +128,7 @@ func Run(iocs []string, feed string) (*core.Result, error) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			intel := lookupAll(ctx, ioc, feodoSet, phish)
+			intel := lookupAll(ctx, ioc, feodoSet, phishSet)
 			mu.Lock()
 			results = append(results, intel)
 			mu.Unlock()
@@ -142,7 +149,8 @@ func Run(iocs []string, feed string) (*core.Result, error) {
 		if sev != core.SevInfo {
 			r.Add(core.Finding{
 				Tool: "ghostint", Severity: sev,
-				Title: "IOC " + i.IOC, Detail: strings.Join(i.Reasons, ", "),
+				Title:    "IOC " + i.IOC,
+				Detail:   strings.Join(i.Reasons, ", "),
 				Evidence: map[string]any{"sources": i.Sources, "score": i.Score},
 			})
 		}
@@ -154,20 +162,27 @@ func Run(iocs []string, feed string) (*core.Result, error) {
 
 func lookupAll(ctx context.Context, ioc string, feodoSet, phishSet map[string]bool) Intel {
 	intel := Intel{IOC: ioc, Kind: string(core.Classify(ioc))}
+	intel.Sources = []string{}
+	intel.Reasons = []string{}
+
 	switch core.Classify(ioc) {
 	case core.IOCIPv4:
 		intel.Geo = lookupGeo(ctx, ioc)
 		intel.ThreatFox = lookupThreatFox(ctx, ioc)
 		intel.FeodoListed = feodoSet[ioc]
+
 	case core.IOCDomain:
 		intel.URLHaus = lookupURLHaus(ctx, ioc)
 		intel.ThreatFox = lookupThreatFox(ctx, ioc)
+
 	case core.IOCURL:
 		intel.ThreatFox = lookupThreatFox(ctx, ioc)
 		intel.OpenPhish = phishSet[ioc]
+
 	case core.IOCMD5, core.IOCSHA1, core.IOCSHA256:
 		intel.ThreatFox = lookupThreatFox(ctx, ioc)
 	}
+
 	if intel.URLHaus != nil {
 		if urls, ok := intel.URLHaus["urls"].([]any); ok && len(urls) > 0 {
 			intel.Sources = append(intel.Sources, "urlhaus")
@@ -202,6 +217,7 @@ func lookupAll(ctx context.Context, ioc string, feodoSet, phishSet map[string]bo
 			intel.Reasons = append(intel.Reasons, "datacenter")
 		}
 	}
+
 	if len(intel.Sources) >= 2 {
 		intel.Score += 20
 		intel.Reasons = append(intel.Reasons, "multi-source corroboration")
@@ -222,7 +238,7 @@ func lookupGeo(ctx context.Context, ip string) map[string]any {
 }
 
 func lookupURLHaus(ctx context.Context, host string) map[string]any {
-	body := []byte(url.Values{"host": {host}}.Encode())
+	body := []byte(url.Values{"host": []string{host}}.Encode())
 	status, resp, err := core.HTTPPost(ctx, urlhausAPI, "application/x-www-form-urlencoded", body, nil)
 	if err != nil || status != 200 {
 		return nil

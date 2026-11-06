@@ -8,48 +8,53 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
-
-	t01 "github.com/ollie/phantomfs/internal/universe/tools/t01_osintcore"
-	t02 "github.com/ollie/phantomfs/internal/universe/tools/t02_geoint"
-	t03 "github.com/ollie/phantomfs/internal/universe/tools/t03_domaintrace"
-	t04 "github.com/ollie/phantomfs/internal/universe/tools/t04_ipintel"
-	t05 "github.com/ollie/phantomfs/internal/universe/tools/t05_userfinder"
-	t06 "github.com/ollie/phantomfs/internal/universe/tools/t06_mailtrace"
-	t07 "github.com/ollie/phantomfs/internal/universe/tools/t07_phototrace"
-	t08 "github.com/ollie/phantomfs/internal/universe/tools/t08_socialmap"
-	t09 "github.com/ollie/phantomfs/internal/universe/tools/t09_linktrace"
-	t10 "github.com/ollie/phantomfs/internal/universe/tools/t10_metatrack"
-	t11 "github.com/ollie/phantomfs/internal/universe/tools/t11_breachwatch"
-	t12 "github.com/ollie/phantomfs/internal/universe/tools/t12_darkintel"
-	t13 "github.com/ollie/phantomfs/internal/universe/tools/t13_certtrace"
-	t14 "github.com/ollie/phantomfs/internal/universe/tools/t14_geoarchive"
-	t15 "github.com/ollie/phantomfs/internal/universe/tools/t15_entitylink"
-	t16 "github.com/ollie/phantomfs/internal/universe/tools/t16_memoryx"
-	t17 "github.com/ollie/phantomfs/internal/universe/tools/t17_binarycore"
-	t18 "github.com/ollie/phantomfs/internal/universe/tools/t18_evidencevault"
-	t19 "github.com/ollie/phantomfs/internal/universe/tools/t19_timelinex"
-	t20 "github.com/ollie/phantomfs/internal/universe/tools/t20_intelgraph"
-	t22 "github.com/ollie/phantomfs/internal/universe/tools/t22_shadowtrace"
-	t23 "github.com/ollie/phantomfs/internal/universe/tools/t23_ghostint"
-	t24 "github.com/ollie/phantomfs/internal/universe/tools/t24_entityx"
-	t25 "github.com/ollie/phantomfs/internal/universe/tools/t25_geocrypt"
-	t26 "github.com/ollie/phantomfs/internal/universe/tools/t26_ipnexus"
-	t27 "github.com/ollie/phantomfs/internal/universe/tools/t27_domainx"
-	t28 "github.com/ollie/phantomfs/internal/universe/tools/t28_identrace"
-	t29 "github.com/ollie/phantomfs/internal/universe/tools/t29_mailscope"
-	t30 "github.com/ollie/phantomfs/internal/universe/tools/t30_photontrace"
-	t31 "github.com/ollie/phantomfs/internal/universe/tools/t31_forensix"
-	t32 "github.com/ollie/phantomfs/internal/universe/tools/t32_malshield"
-	t33 "github.com/ollie/phantomfs/internal/universe/tools/t33_packetx"
-	t34 "github.com/ollie/phantomfs/internal/universe/tools/t34_vulnintel"
-	t35 "github.com/ollie/phantomfs/internal/universe/tools/t35_certnexus"
-	t36 "github.com/ollie/phantomfs/internal/universe/tools/t36_l1xcore"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
+	t01 "github.com/brezzkin-dev/CINT/internal/universe/tools/t01_osintcore"
+	t02 "github.com/brezzkin-dev/CINT/internal/universe/tools/t02_geoint"
+	t03 "github.com/brezzkin-dev/CINT/internal/universe/tools/t03_domaintrace"
+	t04 "github.com/brezzkin-dev/CINT/internal/universe/tools/t04_ipintel"
+	t05 "github.com/brezzkin-dev/CINT/internal/universe/tools/t05_userfinder"
+	t06 "github.com/brezzkin-dev/CINT/internal/universe/tools/t06_mailtrace"
+	t07 "github.com/brezzkin-dev/CINT/internal/universe/tools/t07_phototrace"
+	t08 "github.com/brezzkin-dev/CINT/internal/universe/tools/t08_socialmap"
+	t09 "github.com/brezzkin-dev/CINT/internal/universe/tools/t09_linktrace"
+	t10 "github.com/brezzkin-dev/CINT/internal/universe/tools/t10_metatrack"
+	t11 "github.com/brezzkin-dev/CINT/internal/universe/tools/t11_breachwatch"
+	t12 "github.com/brezzkin-dev/CINT/internal/universe/tools/t12_darkintel"
+	t13 "github.com/brezzkin-dev/CINT/internal/universe/tools/t13_certtrace"
+	t14 "github.com/brezzkin-dev/CINT/internal/universe/tools/t14_geoarchive"
+	t15 "github.com/brezzkin-dev/CINT/internal/universe/tools/t15_entitylink"
+	t16 "github.com/brezzkin-dev/CINT/internal/universe/tools/t16_memoryx"
+	t17 "github.com/brezzkin-dev/CINT/internal/universe/tools/t17_binarycore"
+	t18 "github.com/brezzkin-dev/CINT/internal/universe/tools/t18_evidencevault"
+	t19 "github.com/brezzkin-dev/CINT/internal/universe/tools/t19_timelinex"
+	t20 "github.com/brezzkin-dev/CINT/internal/universe/tools/t20_intelgraph"
+	t22 "github.com/brezzkin-dev/CINT/internal/universe/tools/t22_shadowtrace"
+	t23 "github.com/brezzkin-dev/CINT/internal/universe/tools/t23_ghostint"
+	t24 "github.com/brezzkin-dev/CINT/internal/universe/tools/t24_entityx"
+	t25 "github.com/brezzkin-dev/CINT/internal/universe/tools/t25_geocrypt"
+	t26 "github.com/brezzkin-dev/CINT/internal/universe/tools/t26_ipnexus"
+	t27 "github.com/brezzkin-dev/CINT/internal/universe/tools/t27_domainx"
+	t28 "github.com/brezzkin-dev/CINT/internal/universe/tools/t28_identrace"
+	t29 "github.com/brezzkin-dev/CINT/internal/universe/tools/t29_mailscope"
+	t30 "github.com/brezzkin-dev/CINT/internal/universe/tools/t30_photontrace"
+	t31 "github.com/brezzkin-dev/CINT/internal/universe/tools/t31_forensix"
+	t32 "github.com/brezzkin-dev/CINT/internal/universe/tools/t32_malshield"
+	t33 "github.com/brezzkin-dev/CINT/internal/universe/tools/t33_packetx"
+	t34 "github.com/brezzkin-dev/CINT/internal/universe/tools/t34_vulnintel"
+	t35 "github.com/brezzkin-dev/CINT/internal/universe/tools/t35_certnexus"
+	t36 "github.com/brezzkin-dev/CINT/internal/universe/tools/t36_l1xcore"
+	t37 "github.com/brezzkin-dev/CINT/internal/universe/tools/t37_webcrawl"
+	t38 "github.com/brezzkin-dev/CINT/internal/universe/tools/t38_subdomx"
+	t39 "github.com/brezzkin-dev/CINT/internal/universe/tools/t39_hashcrack"
+	t40 "github.com/brezzkin-dev/CINT/internal/universe/tools/t40_portx"
+	t41 "github.com/brezzkin-dev/CINT/internal/universe/tools/t41_wifianalyze"
 )
 
 const (
-	version = "2.0.0"
+	version = "2.1.0"
 	author  = "L1ghtXr"
 )
 
@@ -61,7 +66,7 @@ const banner = `
  | |_| | |\  |_| |_| |___| |___| |___/____/
   \___/|_| \_|_____\____/\____/\____|_____|
   UNIVERSE ` + version + ` · author ` + author + ` · ` + runtime.Version() + `
-  35 tools — no AI, no ML, real algorithms
+  40 tools · no AI · no ML · real algorithms
 `
 
 func main() {
@@ -75,6 +80,7 @@ func main() {
 func dispatch(cmd string, args []string) {
 	core.SafeRun(cmd, func() {
 		switch cmd {
+		// batch 0 — recon / OSINT
 		case "osintcore":
 			cmdOSINTCORE(args)
 		case "geoint":
@@ -105,6 +111,8 @@ func dispatch(cmd string, args []string) {
 			cmdGeoArchive(args)
 		case "entitylink":
 			cmdEntityLink(args)
+
+		// batch 1 — forensics
 		case "memoryx":
 			cmdMemoryX(args)
 		case "binarycore":
@@ -115,6 +123,8 @@ func dispatch(cmd string, args []string) {
 			cmdTimelineX(args)
 		case "intelgraph":
 			cmdIntelGraph(args)
+
+		// batch 2 — intel
 		case "shadowtrace":
 			cmdShadowTrace(args)
 		case "ghostint":
@@ -125,6 +135,8 @@ func dispatch(cmd string, args []string) {
 			cmdGeoCrypt(args)
 		case "ipnexus":
 			cmdIPNexus(args)
+
+		// batch 3 — domain / media / people
 		case "domainx":
 			cmdDomainX(args)
 		case "identrace":
@@ -135,6 +147,8 @@ func dispatch(cmd string, args []string) {
 			cmdPhotonTrace(args)
 		case "forensix":
 			cmdForenSix(args)
+
+		// batch 4 — offense
 		case "malshield":
 			cmdMalShield(args)
 		case "packetx":
@@ -145,6 +159,19 @@ func dispatch(cmd string, args []string) {
 			cmdCertNexus(args)
 		case "l1xcore":
 			cmdL1XCore(args)
+
+		// batch 5 — net
+		case "webcrawl":
+			cmdWebCrawl(args)
+		case "subdomx":
+			cmdSubDomX(args)
+		case "hashcrack":
+			cmdHashCrack(args)
+		case "portx":
+			cmdPortX(args)
+		case "wifi":
+			cmdWiFi(args)
+
 		case "version", "-v", "--version":
 			fmt.Printf("universe v%s — author %s\n", version, author)
 		case "help", "-h", "--help":
@@ -152,7 +179,7 @@ func dispatch(cmd string, args []string) {
 		case "exit", "quit":
 			os.Exit(0)
 		default:
-			fmt.Fprintf(os.Stderr, "unknown: %s\n", cmd)
+			fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 			help()
 			os.Exit(2)
 		}
@@ -165,55 +192,56 @@ func help() {
 author: %s
 
 intel & recon:
-  osintcore     -target <any>
-  geoint        {-ip X|-coords lat,lng|-image file}
+  osintcore     -target <any>                    router
+  geoint        -ip X | -coords lat,lng | -image f
   domaintrace   -domain example.com
   ipintel       -ip 1.1.1.1
   userfinder    -user <name>
   mailtrace     -email a@b.com
-  linktrace     -url <url>
-
-media forensics:
-  phototrace    -file photo.jpg [-deep]
-  metatrack     -file <any>
-
-people & entities:
+  phototrace    -file img.jpg [-deep]
   socialmap     -user <name>
-  entitylink    -target <name/email/domain/ip>
-
-threat & breach:
+  linktrace     -url <url>
+  metatrack     -file <any>
   breachwatch   -email a@b.com | -domain example.com
-  darkintel     -ioc <value> | -feed urlhaus
+  darkintel     -ioc <value> | -feed urlhaus|threatfox|feodo
   certtrace     -domain example.com
-  geoarchive    {-coords lat,lng|-place <name>}
+  geoarchive    -coords lat,lng | -place <name>
+  entitylink    -target <name/email/domain/ip>
 
 forensics:
   memoryx       -file mem.dump [-min 6]
   binarycore    -file sample.exe
   evidencevault {init|add|verify|list} -vault ./vault [...]
-  timelinex     -in f1.json,f2.log [-from TS] [-to TS]
+  timelinex     -in f1.json,f2.log [-from RFC3339] [-to RFC3339]
   intelgraph    -in r1.json,r2.json -format dot -out graph.dot
 
-batch 2:
+intelligence:
   shadowtrace   -target <domain|email|user>
   ghostint      -ioc ip,domain,hash [-feed all]
   entityx       -in f1.txt,f2.json [-min 2]
-  geocrypt      -coords lat,lng [-from a -to b] [-when RFC3339] [-image photo.jpg]
+  geocrypt      -coords lat,lng [-from a -to b] [-when RFC3339] [-image f]
   ipnexus       -ip 8.8.8.8
 
-batch 3:
+domain / media / people:
   domainx       -domain example.com
   identrace     -user <name> [-email a@b.com]
   mailscope     -file msg.eml
-  photontrace   {-url X|-file photo.jpg} [-compare other.jpg]
+  photontrace   {-url X|-file img.jpg} [-compare other.jpg]
   forensix      [-root ~] [-recent-days 7]
 
-batch 4:
+offense:
   malshield     -file sample.exe
   packetx       -file capture.pcap
   vulnintel     {cve|batch|banner} [...]
   certnexus     -domain example.com
   l1xcore       -target <any>
+
+net:
+  webcrawl      -seed <url> [-depth 3] [-pages 100] [-same-host]
+  subdomx       -domain example.com [-resolve]
+  hashcrack     -hash <hex> -wordlist <path> [-rules]
+  portx         -target ip|cidr|host [-ports top|full|1-1024|22,80] [-workers 500]
+  wifi          -file capture.pcap
 
   version, help
 `, author)
@@ -270,11 +298,11 @@ func splitCSV(s string) []string {
 	return out
 }
 
-// ── batch 0 (t01–t15) ────────────────────────────────────────────
+// ── batch 0 ────────────────────────────────────────────────────────
 
 func cmdOSINTCORE(args []string) {
 	fs := flag.NewFlagSet("osintcore", flag.ExitOnError)
-	target := fs.String("target", "", "target")
+	target := fs.String("target", "", "any target")
 	out := fs.String("out", "", "JSON report")
 	_ = fs.Parse(args)
 	if *target == "" {
@@ -458,7 +486,7 @@ func cmdBreachWatch(args []string) {
 func cmdDarkIntel(args []string) {
 	fs := flag.NewFlagSet("darkintel", flag.ExitOnError)
 	ioc := fs.String("ioc", "", "IOC")
-	feed := fs.String("feed", "", "urlhaus|threatfox|feodo|openphish")
+	feed := fs.String("feed", "", "urlhaus|threatfox|feodo")
 	out := fs.String("out", "", "JSON report")
 	_ = fs.Parse(args)
 	r, err := t12.Run(*ioc, *feed)
@@ -517,7 +545,7 @@ func cmdEntityLink(args []string) {
 	emit(r, *out)
 }
 
-// ── batch 1 (t16–t20) ────────────────────────────────────────────
+// ── batch 1 ────────────────────────────────────────────────────────
 
 func cmdMemoryX(args []string) {
 	fs := flag.NewFlagSet("memoryx", flag.ExitOnError)
@@ -645,7 +673,7 @@ func cmdIntelGraph(args []string) {
 	emit(r, "")
 }
 
-// ── batch 2 (t22–t26) ────────────────────────────────────────────
+// ── batch 2 ────────────────────────────────────────────────────────
 
 func cmdShadowTrace(args []string) {
 	fs := flag.NewFlagSet("shadowtrace", flag.ExitOnError)
@@ -730,7 +758,7 @@ func cmdIPNexus(args []string) {
 	emit(r, *out)
 }
 
-// ── batch 3 (t27–t31) ────────────────────────────────────────────
+// ── batch 3 ────────────────────────────────────────────────────────
 
 func cmdDomainX(args []string) {
 	fs := flag.NewFlagSet("domainx", flag.ExitOnError)
@@ -814,7 +842,7 @@ func cmdForenSix(args []string) {
 	emit(r, *out)
 }
 
-// ── batch 4 (t32–t36) ────────────────────────────────────────────
+// ── batch 4 ────────────────────────────────────────────────────────
 
 func cmdMalShield(args []string) {
 	fs := flag.NewFlagSet("malshield", flag.ExitOnError)
@@ -931,6 +959,102 @@ func cmdL1XCore(args []string) {
 		os.Exit(2)
 	}
 	r, err := t36.Run(*target)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	emit(r, *out)
+}
+
+// ── batch 5 ────────────────────────────────────────────────────────
+
+func cmdWebCrawl(args []string) {
+	fs := flag.NewFlagSet("webcrawl", flag.ExitOnError)
+	seed := fs.String("seed", "", "seed URL")
+	maxDepth := fs.Int("depth", 3, "max link depth")
+	maxPages := fs.Int("pages", 100, "max pages")
+	sameHost := fs.Bool("same-host", true, "same-host only")
+	out := fs.String("out", "", "JSON report")
+	_ = fs.Parse(args)
+	if *seed == "" {
+		fmt.Fprintln(os.Stderr, "webcrawl: -seed required")
+		os.Exit(2)
+	}
+	r, err := t37.Run(t37.Options{Seed: *seed, MaxDepth: *maxDepth, MaxPages: *maxPages, SameHost: *sameHost})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	emit(r, *out)
+}
+
+func cmdSubDomX(args []string) {
+	fs := flag.NewFlagSet("subdomx", flag.ExitOnError)
+	domain := fs.String("domain", "", "apex domain")
+	resolve := fs.Bool("resolve", true, "resolve each subdomain")
+	out := fs.String("out", "", "JSON report")
+	_ = fs.Parse(args)
+	if *domain == "" {
+		fmt.Fprintln(os.Stderr, "subdomx: -domain required")
+		os.Exit(2)
+	}
+	r, err := t38.Run(*domain, *resolve)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	emit(r, *out)
+}
+
+func cmdHashCrack(args []string) {
+	fs := flag.NewFlagSet("hashcrack", flag.ExitOnError)
+	hash := fs.String("hash", "", "target hash")
+	wordlist := fs.String("wordlist", "", "wordlist path")
+	rules := fs.Bool("rules", true, "apply mutation rules")
+	out := fs.String("out", "", "JSON report")
+	_ = fs.Parse(args)
+	if *hash == "" || *wordlist == "" {
+		fmt.Fprintln(os.Stderr, "hashcrack: -hash and -wordlist required")
+		os.Exit(2)
+	}
+	r, err := t39.Run(*hash, *wordlist, *rules)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	emit(r, *out)
+}
+
+func cmdPortX(args []string) {
+	fs := flag.NewFlagSet("portx", flag.ExitOnError)
+	target := fs.String("target", "", "IP, CIDR, or host")
+	ports := fs.String("ports", "top", "top|full|1-1024|22,80,443")
+	timeout := fs.Duration("timeout", 2*time.Second, "per-port timeout")
+	workers := fs.Int("workers", 500, "concurrent dials")
+	out := fs.String("out", "", "JSON report")
+	_ = fs.Parse(args)
+	if *target == "" {
+		fmt.Fprintln(os.Stderr, "portx: -target required")
+		os.Exit(2)
+	}
+	r, err := t40.Run(t40.Options{Target: *target, Ports: *ports, Timeout: *timeout, Workers: *workers})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	emit(r, *out)
+}
+
+func cmdWiFi(args []string) {
+	fs := flag.NewFlagSet("wifi", flag.ExitOnError)
+	file := fs.String("file", "", "802.11 pcap")
+	out := fs.String("out", "", "JSON report")
+	_ = fs.Parse(args)
+	if *file == "" {
+		fmt.Fprintln(os.Stderr, "wifi: -file required")
+		os.Exit(2)
+	}
+	r, err := t41.Run(*file)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

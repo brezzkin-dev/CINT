@@ -14,33 +14,37 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ollie/phantomfs/internal/bloom"
-	"github.com/ollie/phantomfs/internal/carve"
-	"github.com/ollie/phantomfs/internal/chunk"
-	"github.com/ollie/phantomfs/internal/core"
-	"github.com/ollie/phantomfs/internal/entropy"
-	"github.com/ollie/phantomfs/internal/hash"
-	"github.com/ollie/phantomfs/internal/index"
-	"github.com/ollie/phantomfs/internal/magic"
-	"github.com/ollie/phantomfs/internal/modules/classify"
-	"github.com/ollie/phantomfs/internal/modules/dup"
-	"github.com/ollie/phantomfs/internal/modules/hidden"
-	"github.com/ollie/phantomfs/internal/modules/recover"
-	"github.com/ollie/phantomfs/internal/modules/tree"
-	"github.com/ollie/phantomfs/internal/permaudit"
-	"github.com/ollie/phantomfs/internal/scan"
-	"github.com/ollie/phantomfs/internal/watch"
+	"github.com/brezzkin-dev/CINT/internal/bloom"
+	"github.com/brezzkin-dev/CINT/internal/carve"
+	"github.com/brezzkin-dev/CINT/internal/chunk"
+	"github.com/brezzkin-dev/CINT/internal/core"
+	"github.com/brezzkin-dev/CINT/internal/entropy"
+	"github.com/brezzkin-dev/CINT/internal/hash"
+	"github.com/brezzkin-dev/CINT/internal/index"
+	"github.com/brezzkin-dev/CINT/internal/magic"
+	"github.com/brezzkin-dev/CINT/internal/modules/classify"
+	"github.com/brezzkin-dev/CINT/internal/modules/dup"
+	"github.com/brezzkin-dev/CINT/internal/modules/hidden"
+	"github.com/brezzkin-dev/CINT/internal/modules/recover"
+	"github.com/brezzkin-dev/CINT/internal/modules/tree"
+	"github.com/brezzkin-dev/CINT/internal/permaudit"
+	"github.com/brezzkin-dev/CINT/internal/scan"
+	"github.com/brezzkin-dev/CINT/internal/watch"
 )
 
-const version = "2.0.0"
+const (
+	version = "2.1.0"
+	author  = "L1ghtXr"
+)
 
-var banner = `
-    ____  _   _    _    _   _ _____ _____ ___  ____  
-   |  _ \| | | |  / \  | \ | |_   _|  ___/ _ \|  _ \ 
+const banner = `
+    ____  _   _    _    _   _ _____ _____ ___  ____
+   |  _ \| | | |  / \  | \ | |_   _|  ___/ _ \|  _ \
    | |_) | |_| | / _ \ |  \| | | | | |_ | | | | |_) |
-   |  __/|  _  |/ ___ \| |\  | | | |  _|| |_| |  _ < 
+   |  __/|  _  |/ ___ \| |\  | | | |  _|| |_| |  _ <
    |_|   |_| |_/_/   \_\_| \_| |_| |_|   \___/|_| \_\
-    PHANTOMFS 2.0 · filesystem intelligence · Go ` + runtime.Version() + `
+    PHANTOMFS ` + version + ` · author ` + author + ` · ` + runtime.Version() + `
+    filesystem intelligence · no AI · no ML
 `
 
 func main() {
@@ -87,7 +91,7 @@ func dispatch(cmd string, args []string) {
 		case "magic":
 			cmdMagic(args)
 		case "version", "-v", "--version":
-			fmt.Println("phantomfs", version)
+			fmt.Printf("phantomfs v%s — author %s\n", version, author)
 		case "help", "-h", "--help":
 			help()
 		case "exit", "quit":
@@ -95,7 +99,7 @@ func dispatch(cmd string, args []string) {
 		default:
 			fmt.Fprintf(os.Stderr, "unknown command: %s\n", cmd)
 			help()
-			os.Exit(1)
+			os.Exit(2)
 		}
 	})
 }
@@ -104,30 +108,28 @@ func help() {
 	fmt.Print(banner)
 	fmt.Print(`
 commands:
-  scan      [-root DIR] [-max-depth N] [-min-size B] [-workers N] [-json]
-  hidden    [-root DIR] [-json]
-  dupes     [-root DIR] [-json]
-  watch     [-root DIR] [-mode auto|poll|inotify] [-poll 2s] [-json]
-  tree      [-root DIR]
-  classify  [-root DIR] [-json]
-  recover   [-root DIR]
-  snapshot  [-root DIR] [-out file.phfs]
-  diff      [-old old.phfs] [-new new.phfs] [-json]
-  carve     [-file disk.img] [-out carved/] [-json]
-  perm      [-root DIR] [-json]
-  entropy   [-root DIR] [-block 4096] [-min 7.0] [-json]
-  dedup     [-root DIR] [-min 512] [-avg 4096] [-max 65536] [-json]
-  bloom     [-root DIR] [-check-file PATH] [-fp 0.001]
-  hash      [-file PATH] [-json]
-  magic     [-file PATH] [-json]
-  version
-  help
+  scan        [-root DIR] [-max-depth N] [-min-size B] [-workers N] [-json]
+  hidden      [-root DIR] [-json]
+  dupes       [-root DIR] [-json]
+  watch       [-root DIR] [-mode auto|poll|inotify] [-poll 2s] [-json]
+  tree        [-root DIR]
+  classify    [-root DIR] [-json]
+  recover     [-root DIR]
+  snapshot    [-root DIR] [-out file.phfs]
+  diff        -old old.phfs -new new.phfs [-json]
+  carve       -file disk.img [-out carved/] [-json]
+  perm        [-root DIR] [-json]
+  entropy     [-root DIR] [-block 4096] [-min 7.0] [-json]
+  dedup       [-root DIR] [-min 512] [-avg 4096] [-max 65536] [-json]
+  bloom       [-root DIR] [-check-file PATH] [-fp 0.001]
+  hash        -file PATH [-json]
+  magic       -file PATH [-json]
+  version, help
 `)
 }
 
 func interactive() {
 	fmt.Println(banner)
-	fmt.Println("type 'help' for commands, 'exit' to quit.")
 	sc := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print("phantomfs> ")
@@ -143,6 +145,16 @@ func interactive() {
 	}
 }
 
+func emitJSON(v any) {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "marshal failed: %v\n", err)
+		os.Exit(1)
+	}
+	os.Stdout.Write(b)
+	os.Stdout.Write([]byte("\n"))
+}
+
 func cmdScan(args []string) {
 	fs := flag.NewFlagSet("scan", flag.ExitOnError)
 	root := fs.String("root", ".", "scan root")
@@ -156,7 +168,7 @@ func cmdScan(args []string) {
 		Root: *root, MaxDepth: *maxDepth, MinSize: *minSize, Workers: *workers,
 	})
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	if *jsonOut {
@@ -186,7 +198,7 @@ func cmdHidden(args []string) {
 	_ = fs.Parse(args)
 	entries, err := scan.Walk(scan.Options{Root: *root})
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	r := hidden.Detect(entries)
@@ -211,7 +223,7 @@ func cmdDupes(args []string) {
 	_ = fs.Parse(args)
 	entries, err := scan.Walk(scan.Options{Root: *root})
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	groups := dup.Find(entries)
@@ -247,7 +259,8 @@ func cmdWatch(args []string) {
 		}
 	}
 	if err := watch.Watch(ctx, *root, *mode, *poll, cb); err != nil {
-		core.Errorf("watch: %v", err)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
 
@@ -257,7 +270,7 @@ func cmdTree(args []string) {
 	_ = fs.Parse(args)
 	entries, err := scan.Walk(scan.Options{Root: *root})
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	n := tree.Build(entries)
@@ -272,7 +285,7 @@ func cmdClassify(args []string) {
 	_ = fs.Parse(args)
 	entries, err := scan.Walk(scan.Options{Root: *root})
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	results := classify.Classify(entries, nil)
@@ -302,7 +315,7 @@ func cmdRecover(args []string) {
 	_ = fs.Parse(args)
 	n, err := recover.Reconstruct(*root)
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	fmt.Printf("reconstructed %d dirs under %s\n", n, *root)
@@ -315,11 +328,11 @@ func cmdSnapshot(args []string) {
 	_ = fs.Parse(args)
 	entries, err := scan.Walk(scan.Options{Root: *root})
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	if err := index.Save(*out, entries); err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	fmt.Printf("snapshot saved: %s (%d entries)\n", *out, len(entries))
@@ -333,16 +346,16 @@ func cmdDiff(args []string) {
 	_ = fs.Parse(args)
 	if *oldP == "" || *newP == "" {
 		fmt.Fprintln(os.Stderr, "diff: -old and -new required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	oldE, err := index.Load(*oldP)
 	if err != nil {
-		core.Errorf("load old: %v", err)
+		fmt.Fprintf(os.Stderr, "load old: %v\n", err)
 		os.Exit(1)
 	}
 	newE, err := index.Load(*newP)
 	if err != nil {
-		core.Errorf("load new: %v", err)
+		fmt.Fprintf(os.Stderr, "load new: %v\n", err)
 		os.Exit(1)
 	}
 	changes := index.Diff(oldE, newE)
@@ -358,17 +371,17 @@ func cmdDiff(args []string) {
 
 func cmdCarve(args []string) {
 	fs := flag.NewFlagSet("carve", flag.ExitOnError)
-	file := fs.String("file", "", "input file (disk image, raw blob)")
+	file := fs.String("file", "", "input file")
 	out := fs.String("out", "carved", "output dir")
 	jsonOut := fs.Bool("json", false, "JSON output")
 	_ = fs.Parse(args)
 	if *file == "" {
 		fmt.Fprintln(os.Stderr, "carve: -file required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	carved, err := carve.CarveFile(*file, *out)
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	if *jsonOut {
@@ -388,7 +401,7 @@ func cmdPerm(args []string) {
 	_ = fs.Parse(args)
 	entries, err := scan.Walk(scan.Options{Root: *root})
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	findings := permaudit.Audit(entries)
@@ -411,7 +424,7 @@ func cmdEntropy(args []string) {
 	_ = fs.Parse(args)
 	entries, err := scan.Walk(scan.Options{Root: *root})
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	type result struct {
@@ -430,11 +443,11 @@ func cmdEntropy(args []string) {
 		if err != nil {
 			continue
 		}
-		maxE, blk := entropy.BlockMax(data, *block)
-		if maxE < *minE {
+		maxEn, blk := entropy.BlockMax(data, *block)
+		if maxEn < *minE {
 			continue
 		}
-		res := result{Path: e.Path, Size: e.Size, MaxBlock: maxE, BlockIdx: blk}
+		res := result{Path: e.Path, Size: e.Size, MaxBlock: maxEn, BlockIdx: blk}
 		if len(data) >= 512 {
 			if mime, desc, ok := magic.Detect(data[:512]); ok {
 				res.Detection = mime + " (" + desc + ")"
@@ -462,7 +475,7 @@ func cmdDedup(args []string) {
 	_ = fs.Parse(args)
 	entries, err := scan.Walk(scan.Options{Root: *root})
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	f := chunk.NewFastCDC(*minSize, *avgSize, *maxSize, 42)
@@ -537,7 +550,7 @@ func cmdBloom(args []string) {
 	_ = fs.Parse(args)
 	entries, err := scan.Walk(scan.Options{Root: *root})
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	ctx := context.Background()
@@ -594,11 +607,11 @@ func cmdHash(args []string) {
 	_ = fs.Parse(args)
 	if *file == "" {
 		fmt.Fprintln(os.Stderr, "hash: -file required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	h, err := hash.HashFileXXH64(*file)
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	out := map[string]string{"file": *file, "xxh64": fmt.Sprintf("%016x", h)}
@@ -616,11 +629,11 @@ func cmdMagic(args []string) {
 	_ = fs.Parse(args)
 	if *file == "" {
 		fmt.Fprintln(os.Stderr, "magic: -file required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	f, err := os.Open(*file)
 	if err != nil {
-		core.Errorf("%v", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	defer f.Close()
@@ -637,14 +650,4 @@ func cmdMagic(args []string) {
 		return
 	}
 	fmt.Printf("%s: %s (%s)\n", *file, mime, desc)
-}
-
-func emitJSON(v any) {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		core.Errorf("marshal: %v", err)
-		return
-	}
-	os.Stdout.Write(b)
-	os.Stdout.Write([]byte("\n"))
 }
