@@ -1,8 +1,4 @@
 // Package hash provides pure-Go XXH64 with streaming support.
-//
-// XXH64 is a non-cryptographic, 64-bit, fast hash. This file implements
-// the reference algorithm (xxHash spec v0.8.1) plus a streaming state
-// so files can be hashed without loading them fully into memory.
 package hash
 
 const (
@@ -37,7 +33,6 @@ func le32(b []byte) uint32 {
 	return uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
 }
 
-// XXHash64 hashes b with the given seed in one pass.
 func XXHash64(b []byte, seed uint64) uint64 {
 	n := len(b)
 	var h uint64
@@ -84,7 +79,6 @@ func XXHash64(b []byte, seed uint64) uint64 {
 	return h
 }
 
-// XXH64State is a streaming XXH64 accumulator.
 type XXH64State struct {
 	v1, v2, v3, v4 uint64
 	total          uint64
@@ -93,7 +87,6 @@ type XXH64State struct {
 	seed           uint64
 }
 
-// NewXXH64 returns a fresh streaming state with the given seed.
 func NewXXH64(seed uint64) *XXH64State {
 	return &XXH64State{
 		v1:   seed + prime1 + prime2,
@@ -104,7 +97,6 @@ func NewXXH64(seed uint64) *XXH64State {
 	}
 }
 
-// Write appends p to the state. It never returns an error.
 func (s *XXH64State) Write(p []byte) (int, error) {
 	n := len(p)
 	s.total += uint64(n)
@@ -141,7 +133,6 @@ func (s *XXH64State) consume(p []byte) {
 	s.v4 = round(s.v4, le64(p[24:]))
 }
 
-// Sum64 returns the finalized hash of everything written.
 func (s *XXH64State) Sum64() uint64 {
 	var h uint64
 	if s.total >= 32 {
@@ -178,7 +169,6 @@ func (s *XXH64State) Sum64() uint64 {
 	return h
 }
 
-// Reset clears the state while keeping the seed.
 func (s *XXH64State) Reset() {
 	*s = *NewXXH64(s.seed)
 }

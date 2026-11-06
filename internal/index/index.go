@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/ollie/phantomfs/internal/core"
+	"github.com/brezzkin-dev/CINT/internal/core"
 )
 
 const magic = "PHFS"

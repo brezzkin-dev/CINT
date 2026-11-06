@@ -5,14 +5,9 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/ollie/phantomfs/internal/core"
+	"github.com/brezzkin-dev/CINT/internal/core"
 )
 
-// HashParallel hashes every readable file in entries using a worker pool
-// sized to runtime.NumCPU(). It respects ctx cancellation between files.
-//
-// Returned map is keyed by entry.Path. Files that error (permission,
-// vanished mid-read) are silently skipped and logged at debug level.
 func HashParallel(ctx context.Context, entries []core.FileEntry) map[string]uint64 {
 	type job struct {
 		path string

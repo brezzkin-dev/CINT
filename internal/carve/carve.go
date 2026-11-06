@@ -1,6 +1,4 @@
-// Package carve extracts embedded files (JPEG, PNG, GIF, PDF, ZIP) from
-// raw byte streams using signature/end-marker pairs. Every read is
-// bounds-checked; malformed input produces no output rather than panics.
+// Package carve extracts embedded files from raw byte streams.
 package carve
 
 import (
@@ -10,7 +8,6 @@ import (
 	"path/filepath"
 )
 
-// Carved describes a successfully extracted file.
 type Carved struct {
 	Type   string `json:"type"`
 	Offset int64  `json:"offset"`
@@ -33,9 +30,6 @@ var pairs = []sigPair{
 	{"ZIP", []byte("PK\x03\x04"), []byte("PK\x05\x06"), "zip"},
 }
 
-// Carve scans data for known file signatures and writes matches into
-// outDir. Returns the carved files and the first error encountered while
-// writing (scanning itself never errors).
 func Carve(data []byte, outDir string) ([]Carved, error) {
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return nil, err
@@ -84,7 +78,6 @@ func Carve(data []byte, outDir string) ([]Carved, error) {
 	return carved, firstErr
 }
 
-// CarveFile reads path fully and carves it into outDir.
 func CarveFile(path, outDir string) ([]Carved, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

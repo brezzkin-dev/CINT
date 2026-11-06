@@ -1,6 +1,8 @@
 package core
 
-import "time"
+import (
+	"time"
+)
 
 type FileEntry struct {
 	Path      string    `json:"path"`
@@ -39,4 +41,15 @@ type ExtInfo struct {
 	Inode  uint64
 	Nlink  uint64
 	Blocks uint64
+}
+
+func Recover(name string) {
+	if r := recover(); r != nil {
+		Errorf("panic in %s: %v", name, r)
+	}
+}
+
+func SafeRun(name string, fn func()) {
+	defer Recover(name)
+	fn()
 }

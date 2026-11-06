@@ -9,10 +9,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ollie/phantomfs/internal/core"
+	"github.com/brezzkin-dev/CINT/internal/core"
 )
 
-// Options controls a directory walk. Workers == 0 means runtime.NumCPU().
 type Options struct {
 	Root     string
 	MaxDepth int
@@ -21,15 +20,11 @@ type Options struct {
 	Workers  int
 }
 
-// Walk is the serial entry point. It uses one worker.
 func Walk(opts Options) ([]core.FileEntry, error) {
 	opts.Workers = 1
 	return WalkContext(context.Background(), opts)
 }
 
-// WalkContext walks root in parallel using a worker pool of opts.Workers.
-// It returns all entries in arbitrary order. Cancelling ctx aborts early,
-// returning entries collected so far.
 func WalkContext(ctx context.Context, opts Options) ([]core.FileEntry, error) {
 	root, err := filepath.Abs(opts.Root)
 	if err != nil {
@@ -48,7 +43,6 @@ func WalkContext(ctx context.Context, opts Options) ([]core.FileEntry, error) {
 	var mu sync.Mutex
 	var out []core.FileEntry
 
-	// pending counts unprocessed directories + entries still in flight.
 	var pending int32 = 1
 	var emptyOnce sync.Once
 	empty := make(chan struct{})

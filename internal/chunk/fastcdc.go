@@ -1,29 +1,17 @@
-// Package chunk implements FastCDC — a normalized content-defined chunking
-// algorithm (Xia et al., "FastCDC: a Fast and Efficient Content-Defined
-// Chunking Approach for Data Deduplication", USENIX ATC 2016).
-//
-// FastCDC improves on pure Gear-hash chunking by using two masks:
-//   - a *strict* mask in [min, avg) so chunks don't cut too early,
-//   - a *loose* mask in [avg, max) so chunks don't grow too large.
-//
-// The result is a tighter chunk-size distribution around `avg`, which is
-// better for deduplication because it produces fewer tiny/large outliers.
+// Package chunk implements FastCDC (Xia et al., USENIX ATC 2016).
 package chunk
 
 import "math/rand"
 
-// FastCDC is a reusable content-defined chunker.
 type FastCDC struct {
 	table [256]uint64
-	maskS uint64 // strict mask (more 1-bits) — used pre-avg
-	maskL uint64 // loose mask (fewer 1-bits) — used post-avg
+	maskS uint64
+	maskL uint64
 	Min   int
 	Avg   int
 	Max   int
 }
 
-// NewFastCDC returns a chunker with the given min/avg/max sizes in bytes.
-// avgBits is derived from Avg as log2(Avg).
 func NewFastCDC(minSize, avgSize, maxSize int, seed int64) *FastCDC {
 	if minSize < 1 {
 		minSize = 1
@@ -67,10 +55,6 @@ func genMask(bits uint) uint64 {
 	return (uint64(1) << bits) - 1
 }
 
-// Cut returns the offsets at which to split data. The last element is
-// always len(data). The first element is never 0.
-//
-// Every chunk satisfies Min <= size <= Max except possibly the last.
 func (f *FastCDC) Cut(data []byte) []int {
 	n := len(data)
 	if n == 0 {
@@ -80,7 +64,6 @@ func (f *FastCDC) Cut(data []byte) []int {
 	var cuts []int
 	start := 0
 	for start < n {
-		// Below Min: don't even look for a cut.
 		minEnd := start + f.Min
 		if minEnd >= n {
 			cuts = append(cuts, n)
@@ -90,7 +73,6 @@ func (f *FastCDC) Cut(data []byte) []int {
 		var fp uint64
 		pos := minEnd
 
-		// Region 1: [Min, Avg) — strict mask, harder to hit 0.
 		region1End := start + f.Avg
 		if region1End > n {
 			region1End = n
@@ -103,7 +85,6 @@ func (f *FastCDC) Cut(data []byte) []int {
 			pos++
 		}
 
-		// Region 2: [Avg, Max) — loose mask, easier to hit 0.
 		region2End := start + f.Max
 		if region2End > n {
 			region2End = n
@@ -129,7 +110,6 @@ func (f *FastCDC) Cut(data []byte) []int {
 	return cuts
 }
 
-// Stats returns distribution info for a set of cuts, for diagnostics.
 type Stats struct {
 	Count, Min, Max, Sum int
 }
