@@ -2,24 +2,24 @@ package t32_malshield
 
 import (
 	"debug/pe"
-	"encoding/binary"
+	"fmt"
 	"sort"
 	"strings"
 )
 
 type peInfo struct {
-	Machine    string   `json:"machine"`
-	Subsystem  string   `json:"subsystem"`
-	Timestamp  uint32   `json:"timestamp"`
-	EntryPoint uint32   `json:"entry_point"`
-	ImageBase  uint64   `json:"image_base"`
-	SizeImage  uint32   `json:"size_image"`
-	NumSections int     `json:"num_sections"`
-	Imphash    string   `json:"imphash"`
-	Overlay    int64    `json:"overlay_bytes"`
-	Sections   []peSec  `json:"sections"`
-	ImportDLLs []string `json:"import_dlls"`
-	ImportFns  []string `json:"import_fns"`
+	Machine     string   `json:"machine"`
+	Subsystem   string   `json:"subsystem"`
+	Timestamp   uint32   `json:"timestamp"`
+	EntryPoint  uint32   `json:"entry_point"`
+	ImageBase   uint64   `json:"image_base"`
+	SizeImage   uint32   `json:"size_image"`
+	NumSections int      `json:"num_sections"`
+	Imphash     string   `json:"imphash"`
+	Overlay     int64    `json:"overlay_bytes"`
+	Sections    []peSec  `json:"sections"`
+	ImportDLLs  []string `json:"import_dlls"`
+	ImportFns   []string `json:"import_fns"`
 }
 
 type peSec struct {
@@ -37,8 +37,8 @@ func analyzePE(path string, data []byte) (*peInfo, error) {
 	defer f.Close()
 
 	info := &peInfo{
-		Machine:    machineName(f.Machine),
-		Timestamp:  f.FileHeader.TimeDateStamp,
+		Machine:     machineName(f.Machine),
+		Timestamp:   f.FileHeader.TimeDateStamp,
 		NumSections: len(f.Sections),
 	}
 
@@ -100,8 +100,6 @@ func imphash(fns []string) string {
 	}
 	sort.Strings(lower)
 	joined := strings.Join(lower, ",")
-	// Deterministic 64-bit FNV-1a as a compact imphash. Not MD5-compatible
-	// with Mandiant but stable and dependency-free.
 	var h uint64 = 14695981039346656037
 	for i := 0; i < len(joined); i++ {
 		h ^= uint64(joined[i])
@@ -131,7 +129,7 @@ func machineName(m uint16) string {
 	case pe.IMAGE_FILE_MACHINE_ARM:
 		return "arm"
 	}
-	return "unknown"
+	return fmt.Sprintf("unknown_0x%04x", m)
 }
 
 func subsystemName(s uint16) string {
@@ -143,19 +141,5 @@ func subsystemName(s uint16) string {
 	case 3:
 		return "windows_console"
 	}
-	return "unknown"
-}
-
-func readPEHeader(data []byte) (uint32, bool) {
-	if len(data) < 64 || data[0] != 'M' || data[1] != 'Z' {
-		return 0, false
-	}
-	off := binary.LittleEndian.Uint32(data[0x3C:0x40])
-	if int(off)+4 > len(data) {
-		return 0, false
-	}
-	if data[off] != 'P' || data[off+1] != 'E' {
-		return 0, false
-	}
-	return off, true
+	return fmt.Sprintf("unknown_%d", s)
 }

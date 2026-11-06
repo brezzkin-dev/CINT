@@ -5,16 +5,16 @@ import (
 	"regexp"
 	"strings"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 type rule struct {
-	Name      string
-	Severity  core.Severity
-	Strings   [][]byte
-	AllMust   bool
-	Mitre     string
-	Desc      string
+	Name     string
+	Severity core.Severity
+	Strings  [][]byte
+	AllMust  bool
+	Mitre    string
+	Desc     string
 }
 
 var builtinRules = []rule{
@@ -106,13 +106,6 @@ var builtinRules = []rule{
 		}},
 }
 
-// customRule parses a simple YARA-lite file:
-//   rule NAME {
-//     strings:
-//       $a = "literal"
-//       $b = { DE AD BE EF }
-//     condition: any of them
-//   }
 var reRuleName = regexp.MustCompile(`(?m)^\s*rule\s+(\w+)`)
 var reString = regexp.MustCompile(`(?m)^\s*\$\w+\s*=\s*"([^"]+)"`)
 var reHexStr = regexp.MustCompile(`(?m)^\s*\$\w+\s*=\s*\{\s*([0-9A-Fa-f\s]+)\s*\}`)
@@ -135,17 +128,17 @@ func loadCustomRules(path string) []rule {
 			r.Strings = append(r.Strings, []byte(m[1]))
 		}
 		for _, m := range reHexStr.FindAllStringSubmatch(b, -1) {
-			hex := strings.ReplaceAll(m[1], " ", "")
-			hex = strings.ReplaceAll(hex, "\n", "")
-			hex = strings.ReplaceAll(hex, "\t", "")
-			if len(hex)%2 != 0 {
+			hexStr := strings.ReplaceAll(m[1], " ", "")
+			hexStr = strings.ReplaceAll(hexStr, "\n", "")
+			hexStr = strings.ReplaceAll(hexStr, "\t", "")
+			if len(hexStr)%2 != 0 {
 				continue
 			}
-			buf := make([]byte, len(hex)/2)
+			buf := make([]byte, len(hexStr)/2)
 			ok := true
-			for i := 0; i < len(hex); i += 2 {
-				hi := hexNibble(hex[i])
-				lo := hexNibble(hex[i+1])
+			for i := 0; i < len(hexStr); i += 2 {
+				hi := hexNibble(hexStr[i])
+				lo := hexNibble(hexStr[i+1])
 				if hi < 0 || lo < 0 {
 					ok = false
 					break

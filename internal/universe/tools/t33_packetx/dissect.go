@@ -3,7 +3,6 @@ package t33_packetx
 import (
 	"encoding/binary"
 	"net/url"
-	"strconv"
 	"strings"
 )
 
@@ -36,7 +35,6 @@ func parseHTTPHost(payload []byte) (host, uri, method string, ok bool) {
 	if len(payload) < 10 {
 		return
 	}
-	// Must start with method + space
 	space := -1
 	for i := 0; i < len(payload) && i < 10; i++ {
 		if payload[i] == ' ' {
@@ -53,7 +51,6 @@ func parseHTTPHost(payload []byte) (host, uri, method string, ok bool) {
 	default:
 		return
 	}
-	// URI up to next space
 	uriStart := space + 1
 	uriEnd := uriStart
 	for uriEnd < len(payload) && payload[uriEnd] != ' ' && payload[uriEnd] != '\r' {
@@ -63,7 +60,6 @@ func parseHTTPHost(payload []byte) (host, uri, method string, ok bool) {
 		return
 	}
 	uri = string(payload[uriStart:uriEnd])
-	// Find Host header
 	head := string(payload)
 	if idx := strings.Index(head, "\r\n\r\n"); idx > 0 {
 		head = head[:idx]
@@ -162,9 +158,4 @@ func formatURL(scheme, host, uri string) string {
 	}
 	u := &url.URL{Scheme: scheme, Host: host, Path: uri}
 	return u.String()
-}
-
-func atoiSafe(s string) int {
-	n, _ := strconv.Atoi(s)
-	return n
 }

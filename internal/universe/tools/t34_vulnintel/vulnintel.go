@@ -1,5 +1,3 @@
-// Package t34_vulnintel correlates CVE data from NVD, EPSS, and CISA KEV.
-// Adds banner-to-CVE matching via CPE keywords + version comparison.
 package t34_vulnintel
 
 import (
@@ -15,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 const (
@@ -133,7 +131,7 @@ func Batch(path string) (*core.Result, error) {
 
 	results := make([]*cveResult, len(ids))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4) // NVD rate limit
+	sem := make(chan struct{}, 4)
 	for i, id := range ids {
 		wg.Add(1)
 		go func(i int, id string) {
@@ -181,7 +179,6 @@ func FromBanner(banner string) (*core.Result, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// Parse product and version from banner: "Apache/2.4.49 (Unix)"
 	m := regexp.MustCompile(`([A-Za-z][\w\-]+)[/\s]v?(\d+\.\d+(?:\.\d+)?)`).FindStringSubmatch(banner)
 	if m == nil {
 		return r, fmt.Errorf("no product/version in banner")
@@ -191,7 +188,6 @@ func FromBanner(banner string) (*core.Result, error) {
 	r.AddExtra("product", product)
 	r.AddExtra("version", version)
 
-	// Search NVD by keyword
 	url := fmt.Sprintf(nvdKeyword, product)
 	status, _, body, err := core.HTTPGet(ctx, url, nil)
 	if err != nil || status != 200 {
@@ -230,7 +226,7 @@ func FromBanner(banner string) (*core.Result, error) {
 	var matching []*cveResult
 	for _, v := range nvd.Vulnerabilities {
 		cve := v.CVE
-		matches, _ := versionMatchesBanner(product, version, cve.Configurations)
+		matches := versionMatchesBanner(product, version, cve.Configurations)
 		if !matches {
 			continue
 		}
@@ -274,19 +270,18 @@ func FromBanner(banner string) (*core.Result, error) {
 		}
 		r.Add(core.Finding{
 			Tool: "vulnintel", Severity: sev,
-			Title: c.ID + fmt.Sprintf(" (CVSS %.1f)", c.CVSS),
+			Title:  c.ID + fmt.Sprintf(" (CVSS %.1f)", c.CVSS),
 			Detail: truncate(c.Description, 200),
 			Evidence: map[string]any{
 				"in_kev": c.InKEV, "epss": c.EPSS,
 			},
 		})
 	}
-	r.AddExtra("matching_cves", matching)
-	r.AddExtra("match_count", len(matching))
-
 	if len(matching) > 20 {
 		matching = matching[:20]
 	}
+	r.AddExtra("matching_cves", matching)
+	r.AddExtra("match_count", len(matching))
 	r.Finish()
 	return r, nil
 }
@@ -348,7 +343,7 @@ func fetchCVE(ctx context.Context, id string) (*cveResult, error) {
 	for _, ref := range cve.References {
 		res.References = append(res.References, ref.URL)
 		if strings.Contains(ref.URL, "exploit-db") ||
-			strings.Contains(ref.URL, "github.com/") && strings.Contains(ref.URL, "PoC") {
+			(strings.Contains(ref.URL, "github.com/") && strings.Contains(ref.URL, "PoC")) {
 			res.ExploitRefs = append(res.ExploitRefs, ref.URL)
 		}
 	}
@@ -381,22 +376,18 @@ func fetchEPSS(ctx context.Context, id string) (float64, float64) {
 	return e, p
 }
 
-// versionMatchesBanner parses CPE strings in the NVD config and checks if
-// the banner's product + version falls in the vulnerable range.
 func versionMatchesBanner(product, version string, configs []struct {
 	Nodes []struct {
 		CPEMatch []struct {
 			Criteria string `json:"criteria"`
 		} `json:"cpeMatch"`
 	} `json:"nodes"`
-}) (bool, []string) {
+}) bool {
 	productLower := strings.ToLower(product)
-	var hits []string
 	for _, cfg := range configs {
 		for _, node := range cfg.Nodes {
 			for _, cpe := range node.CPEMatch {
 				crit := cpe.Criteria
-				// cpe:2.3:a:vendor:product:version:...
 				parts := strings.Split(crit, ":")
 				if len(parts) < 6 {
 					continue
@@ -407,19 +398,17 @@ func versionMatchesBanner(product, version string, configs []struct {
 					continue
 				}
 				if cpeVersion == "*" || cpeVersion == "-" {
-					hits = append(hits, crit)
-					continue
+					return true
 				}
 				if versionCompare(version, cpeVersion) == 0 {
-					hits = append(hits, crit)
+					return true
 				}
 			}
 		}
 	}
-	return len(hits) > 0, hits
+	return false
 }
 
-// versionCompare returns -1, 0, 1.
 func versionCompare(a, b string) int {
 	pa := strings.Split(a, ".")
 	pb := strings.Split(b, ".")

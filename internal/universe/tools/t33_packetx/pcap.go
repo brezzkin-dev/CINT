@@ -8,9 +8,9 @@ import (
 )
 
 type packet struct {
-	TS    time.Time
-	Data  []byte
-	Idx   int
+	TS   time.Time
+	Data []byte
+	Idx  int
 }
 
 type pcapHeader struct {
@@ -73,19 +73,19 @@ func readPCAP(path string) ([]packet, pcapHeader, error) {
 
 func l2Payload(link uint32, pkt []byte) (uint16, []byte, bool) {
 	switch link {
-	case 1: // Ethernet
+	case 1:
 		if len(pkt) < 14 {
 			return 0, nil, false
 		}
 		et := binary.BigEndian.Uint16(pkt[12:14])
 		return et, pkt[14:], true
-	case 113: // Linux SLL
+	case 113:
 		if len(pkt) < 16 {
 			return 0, nil, false
 		}
 		et := binary.BigEndian.Uint16(pkt[14:16])
 		return et, pkt[16:], true
-	case 276: // Linux SLL2
+	case 276:
 		if len(pkt) < 20 {
 			return 0, nil, false
 		}

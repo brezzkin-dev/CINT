@@ -1,9 +1,3 @@
-// Package t32_malshield is supersized static malware analysis:
-//   - full PE/ELF parse, section entropy, overlay detection
-//   - imphash (FNV-64 over sorted lowercase imports)
-//   - YARA-lite engine with 12 built-in MITRE-mapped rules
-//   - API behavior sequence detection
-//   - string sweep with IOC regexes
 package t32_malshield
 
 import (
@@ -15,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 var (
@@ -72,8 +66,7 @@ func Run(path string) (*core.Result, error) {
 	r.AddExtra("sha1", sha1Hex(data))
 	r.AddExtra("overall_entropy", roundf(entropy(data), 3))
 
-	// PE branch
-	if data[0] == 'M' && data[1] == 'Z' {
+	if len(data) >= 2 && data[0] == 'M' && data[1] == 'Z' {
 		if info, err := analyzePE(path, data); err == nil {
 			r.AddExtra("pe", info)
 			emitPEFindings(r, info)
@@ -85,7 +78,6 @@ func Run(path string) (*core.Result, error) {
 		}
 	}
 
-	// API behavior hits
 	lower := strings.ToLower(string(data))
 	var apiHits []string
 	for api, sev := range suspiciousAPIs {
@@ -100,21 +92,18 @@ func Run(path string) (*core.Result, error) {
 	sort.Strings(apiHits)
 	r.AddExtra("api_hits", apiHits)
 
-	// String sweep
 	urls := uniqueStrings(reURL.FindAllString(string(data), 50))
 	ips := uniqueStrings(reIP.FindAllString(string(data), 50))
 	r.AddExtra("urls", urls)
 	r.AddExtra("ips", ips)
 	if len(urls) > 0 {
 		r.Add(core.Finding{Tool: "malshield", Severity: core.SevMed,
-			Title: fmt.Sprintf("%d embedded URLs", len(urls)),
+			Title:  fmt.Sprintf("%d embedded URLs", len(urls)),
 			Detail: strings.Join(urls[:minInt(3, len(urls))], "; ")})
 	}
 
-	// YARA
 	runYara(r, data, "")
 
-	// Score
 	score := 0
 	for _, f := range r.Findings {
 		switch f.Severity {
@@ -145,7 +134,7 @@ func emitPEFindings(r *core.Result, info *peInfo) {
 		if s.RawSize > 512 && s.Entropy > 7.2 {
 			r.Add(core.Finding{
 				Tool: "malshield", Severity: core.SevHigh,
-				Title: "Packed section: " + s.Name,
+				Title:    "Packed section: " + s.Name,
 				Evidence: map[string]any{"entropy": s.Entropy, "raw_size": s.RawSize},
 			})
 		}
@@ -153,21 +142,9 @@ func emitPEFindings(r *core.Result, info *peInfo) {
 	if info.Overlay > 1024 {
 		r.Add(core.Finding{
 			Tool: "malshield", Severity: core.SevMed,
-			Title: "PE overlay",
+			Title:  "PE overlay",
 			Detail: fmt.Sprintf("%d bytes appended after last section", info.Overlay),
 		})
-	}
-}
-
-func emitELFFindings(r *core.Result, info *elfInfo) {
-	for _, s := range info.Sections {
-		if s.Size > 512 && s.Entropy > 7.2 {
-			r.Add(core.Finding{
-				Tool: "malshield", Severity: core.SevHigh,
-				Title: "Packed section: " + s.Name,
-				Evidence: map[string]any{"entropy": s.Entropy, "size": s.Size},
-			})
-		}
 	}
 }
 
@@ -201,6 +178,18 @@ func analyzeELF(path string) (*elfInfo, error) {
 		info.Needed = needed
 	}
 	return info, nil
+}
+
+func emitELFFindings(r *core.Result, info *elfInfo) {
+	for _, s := range info.Sections {
+		if s.Size > 512 && s.Entropy > 7.2 {
+			r.Add(core.Finding{
+				Tool: "malshield", Severity: core.SevHigh,
+				Title:    "Packed section: " + s.Name,
+				Evidence: map[string]any{"entropy": s.Entropy, "size": s.Size},
+			})
+		}
+	}
 }
 
 func entropy(b []byte) float64 {
@@ -246,3 +235,5 @@ func minInt(a, b int) int {
 	}
 	return b
 }
+
+var _ = reStr

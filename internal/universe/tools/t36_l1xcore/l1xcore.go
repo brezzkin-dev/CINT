@@ -1,21 +1,19 @@
-// Package t36_l1xcore is the universal orchestrator: classify target,
-// dispatch to the appropriate UNIVERSE tools in parallel, merge findings
-// with dedupe, correlate entities across tools, and score aggregate risk.
 package t36_l1xcore
 
 import (
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"sync"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
-	t27_domainx "github.com/ollie/phantomfs/internal/universe/tools/t27_domainx"
-	t28_identrace "github.com/ollie/phantomfs/internal/universe/tools/t28_identrace"
-	t04_ipintel "github.com/ollie/phantomfs/internal/universe/tools/t04_ipintel"
-	t05_userfinder "github.com/ollie/phantomfs/internal/universe/tools/t05_userfinder"
-	t06_mailtrace "github.com/ollie/phantomfs/internal/universe/tools/t06_mailtrace"
-	t35_certnexus "github.com/ollie/phantomfs/internal/universe/tools/t35_certnexus"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
+	t04_ipintel "github.com/brezzkin-dev/CINT/internal/universe/tools/t04_ipintel"
+	t05_userfinder "github.com/brezzkin-dev/CINT/internal/universe/tools/t05_userfinder"
+	t06_mailtrace "github.com/brezzkin-dev/CINT/internal/universe/tools/t06_mailtrace"
+	t27_domainx "github.com/brezzkin-dev/CINT/internal/universe/tools/t27_domainx"
+	t28_identrace "github.com/brezzkin-dev/CINT/internal/universe/tools/t28_identrace"
+	t35_certnexus "github.com/brezzkin-dev/CINT/internal/universe/tools/t35_certnexus"
 )
 
 type dispatchResult struct {
@@ -100,7 +98,6 @@ func Run(target string) (*core.Result, error) {
 	}
 	wg.Wait()
 
-	// Merge findings with dedupe
 	seen := map[string]bool{}
 	entityCount := 0
 	for _, dr := range results {
@@ -129,10 +126,8 @@ func Run(target string) (*core.Result, error) {
 	r.AddExtra("sub_tools_run", len(results))
 	r.AddExtra("deduped_findings", entityCount)
 
-	// Correlate entities across subtool extras
 	correlate(r)
 
-	// Aggregate risk score
 	score := 0
 	for _, f := range r.Findings {
 		switch f.Severity {
@@ -159,7 +154,6 @@ func Run(target string) (*core.Result, error) {
 }
 
 func correlate(r *core.Result) {
-	// Cross-tool: look for shared IPs / domains across subtool extras
 	ipSources := map[string][]string{}
 	domainSources := map[string][]string{}
 
@@ -217,23 +211,11 @@ func scanForEntities(v any, tool string, ips, domains map[string][]string) {
 }
 
 func isIP(s string) bool {
-	// cheap check
 	if len(s) < 7 || len(s) > 45 {
 		return false
 	}
-	parts := strings.Split(s, ".")
-	if len(parts) != 4 {
+	if net.ParseIP(s) == nil {
 		return false
-	}
-	for _, p := range parts {
-		if len(p) == 0 || len(p) > 3 {
-			return false
-		}
-		for _, c := range p {
-			if c < '0' || c > '9' {
-				return false
-			}
-		}
 	}
 	return true
 }
@@ -248,7 +230,6 @@ func isDomainLike(s string) bool {
 	if strings.Contains(s, "://") || strings.Contains(s, "@") || strings.Contains(s, " ") {
 		return false
 	}
-	// Reject file paths
 	if strings.ContainsAny(s, "/\\:") {
 		return false
 	}

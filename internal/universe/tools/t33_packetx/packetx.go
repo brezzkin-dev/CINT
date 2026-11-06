@@ -1,12 +1,3 @@
-// Package t33_packetx is supersized PCAP analysis:
-//   - IPv4/IPv6, TCP/UDP parsing
-//   - per-flow byte/packet stats, top talkers
-//   - DNS query extraction
-//   - HTTP host/URI extraction
-//   - TLS SNI extraction
-//   - FTP credentials
-//   - HTTP Basic auth extraction
-//   - periodic beacon detection per flow
 package t33_packetx
 
 import (
@@ -15,13 +6,13 @@ import (
 	"sort"
 	"strings"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 type flowKey struct {
-	SrcIP, DstIP string
+	SrcIP, DstIP     string
 	SrcPort, DstPort uint16
-	Proto        uint8
+	Proto            uint8
 }
 
 func (k flowKey) String() string {
@@ -29,11 +20,11 @@ func (k flowKey) String() string {
 }
 
 type flowStat struct {
-	Key       flowKey
-	Packets   int
-	Bytes     int
-	FirstTS   int64
-	LastTS    int64
+	Key        flowKey
+	Packets    int
+	Bytes      int
+	FirstTS    int64
+	LastTS     int64
 	Timestamps []int64
 }
 
@@ -57,7 +48,6 @@ func Run(path string) (*core.Result, error) {
 	httpURIs := []string{}
 	tlsSNIs := map[string]int{}
 	var creds []credential
-	tcpPayload := map[flowKey][]byte{}
 
 	for _, pkt := range pkts {
 		et, l3, ok := l2Payload(hdr.Link, pkt.Data)
@@ -87,17 +77,12 @@ func Run(path string) (*core.Result, error) {
 			}
 			k := flowKey{srcIP, dstIP, sport, dport, 6}
 			recordFlow(flows, k, len(payload), pkt.TS.Unix())
-			if len(payload) > 0 {
-				tcpPayload[k] = append(tcpPayload[k], payload...)
-			}
-			if strings.HasPrefix(string(payload), "USER ") || strings.HasPrefix(string(payload), "PASS ") {
-				if kind, v, ok := parseFTPUser(payload); ok {
-					creds = append(creds, credential{
-						Src: srcIP, Dst: dstIP, Proto: "ftp", Kind: kind,
-						User: pick(kind == "user", v, ""),
-						Pass: pick(kind == "pass", v, ""),
-					})
-				}
+			if kind, v, ok := parseFTPUser(payload); ok {
+				creds = append(creds, credential{
+					Src: srcIP, Dst: dstIP, Proto: "ftp", Kind: kind,
+					User: pick(kind == "user", v, ""),
+					Pass: pick(kind == "pass", v, ""),
+				})
 			}
 			if auth, ok := parseHTTPBasicAuth(payload); ok {
 				creds = append(creds, credential{
@@ -129,7 +114,6 @@ func Run(path string) (*core.Result, error) {
 		}
 	}
 
-	// Top talkers
 	topSrc := topBy(func() map[string]int {
 		m := map[string]int{}
 		for _, f := range flows {
@@ -147,7 +131,6 @@ func Run(path string) (*core.Result, error) {
 	r.AddExtra("top_src", topSrc)
 	r.AddExtra("top_dst", topDst)
 
-	// Beacons
 	beacons := detectBeacons(flows)
 	for _, b := range beacons {
 		r.Add(core.Finding{
@@ -159,11 +142,10 @@ func Run(path string) (*core.Result, error) {
 	}
 	r.AddExtra("beacons", beacons)
 
-	// Emit findings
 	if len(creds) > 0 {
 		r.Add(core.Finding{
 			Tool: "packetx", Severity: core.SevCrit,
-			Title: fmt.Sprintf("%d cleartext credentials", len(creds)),
+			Title:  fmt.Sprintf("%d cleartext credentials", len(creds)),
 			Detail: "credentials sent unencrypted",
 		})
 	}
@@ -281,3 +263,5 @@ func detectBeacons(flows map[flowKey]*flowStat) []beacon {
 	}
 	return out
 }
+
+var _ = strings.TrimSpace

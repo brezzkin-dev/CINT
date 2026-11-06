@@ -1,6 +1,3 @@
-// Package t35_certnexus builds a certificate-intelligence picture for a
-// domain: live TLS chain, CT-log history from crt.sh, issuer/CA mapping,
-// wildcard tracking, SAN extraction, and cross-domain cert pivoting.
 package t35_certnexus
 
 import (
@@ -13,29 +10,26 @@ import (
 	"strings"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
-const (
-	crtDomainURL = "https://crt.sh/?q=%s&output=json"
-	crtOrgURL    = "https://crt.sh/?q=%s&output=json"
-)
+const crtDomainURL = "https://crt.sh/?q=%s&output=json"
 
 type liveCert struct {
-	Subject    string   `json:"subject"`
-	Issuer     string   `json:"issuer"`
-	IssuerCN   string   `json:"issuer_cn"`
-	NotBefore  string   `json:"not_before"`
-	NotAfter   string   `json:"not_after"`
-	Serial     string   `json:"serial"`
-	DNSNames   []string `json:"dns_names"`
-	IsWildcard bool     `json:"is_wildcard"`
-	SigAlgo    string   `json:"sig_algo"`
-	KeyAlgo    string   `json:"key_algo"`
-	TLSVersion string   `json:"tls_version"`
-	CipherSuite string  `json:"cipher_suite"`
-	Verified   bool     `json:"tls_verified"`
-	ChainLen   int      `json:"chain_len"`
+	Subject     string   `json:"subject"`
+	Issuer      string   `json:"issuer"`
+	IssuerCN    string   `json:"issuer_cn"`
+	NotBefore   string   `json:"not_before"`
+	NotAfter    string   `json:"not_after"`
+	Serial      string   `json:"serial"`
+	DNSNames    []string `json:"dns_names"`
+	IsWildcard  bool     `json:"is_wildcard"`
+	SigAlgo     string   `json:"sig_algo"`
+	KeyAlgo     string   `json:"key_algo"`
+	TLSVersion  string   `json:"tls_version"`
+	CipherSuite string   `json:"cipher_suite"`
+	Verified    bool     `json:"tls_verified"`
+	ChainLen    int      `json:"chain_len"`
 }
 
 type ctCert struct {
@@ -54,13 +48,12 @@ func Run(domain string) (*core.Result, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	// 1. Live TLS
 	live := grabLiveCert(domain)
 	r.AddExtra("live_cert", live)
 	if live != nil {
 		if !live.Verified {
 			r.Add(core.Finding{Tool: "certnexus", Severity: core.SevMed,
-				Title: "TLS cert verification FAILED",
+				Title:  "TLS cert verification NOT confirmed",
 				Detail: "connection used InsecureSkipVerify — inspect chain manually"})
 		}
 		expiry, err := time.Parse(time.RFC3339, live.NotAfter)
@@ -69,11 +62,10 @@ func Run(domain string) (*core.Result, error) {
 			r.AddExtra("days_until_expiry", days)
 			if days < 0 {
 				r.Add(core.Finding{Tool: "certnexus", Severity: core.SevCrit,
-					Title: "Certificate EXPIRED",
-					Detail: live.NotAfter})
+					Title: "Certificate EXPIRED", Detail: live.NotAfter})
 			} else if days < 30 {
 				r.Add(core.Finding{Tool: "certnexus", Severity: core.SevMed,
-					Title: fmt.Sprintf("Certificate expires in %d days", days),
+					Title:  fmt.Sprintf("Certificate expires in %d days", days),
 					Detail: live.NotAfter})
 			}
 		}
@@ -88,21 +80,18 @@ func Run(domain string) (*core.Result, error) {
 		}
 	}
 
-	// 2. CT log
 	ct, err := fetchCT(ctx, domain)
 	if err != nil {
 		core.Debugf("ct: %v", err)
 	} else {
 		r.AddExtra("ct_count", len(ct))
 
-		// Group by issuer
 		issuers := map[string]int{}
 		for _, c := range ct {
 			issuers[c.IssuerName]++
 		}
 		r.AddExtra("ct_issuers", mapToSorted(issuers))
 
-		// Extract SANs across all certs
 		sans := map[string]bool{}
 		wildcards := map[string]bool{}
 		for _, c := range ct {
@@ -122,7 +111,6 @@ func Run(domain string) (*core.Result, error) {
 		r.AddExtra("subdomains_from_ct", mapKeys(sans, 300))
 		r.AddExtra("wildcards_from_ct", mapKeys(wildcards, 50))
 
-		// Latest certs
 		sort.Slice(ct, func(i, j int) bool { return ct[i].NotBefore > ct[j].NotBefore })
 		if len(ct) > 0 {
 			latest := ct[0]
@@ -134,12 +122,11 @@ func Run(domain string) (*core.Result, error) {
 			})
 		}
 
-		// CA relationship count
 		if len(issuers) > 1 {
 			r.Add(core.Finding{
 				Tool: "certnexus", Severity: core.SevInfo,
-				Title: fmt.Sprintf("%d CAs issued certs for this domain", len(issuers)),
-				Detail: strings.Join(mapKeys(issuers, 10), ", "),
+				Title:  fmt.Sprintf("%d CAs issued certs for this domain", len(issuers)),
+				Detail: strings.Join(mapIntKeys(issuers, 10), ", "),
 			})
 		}
 	}
@@ -162,9 +149,7 @@ func grabLiveCert(domain string) *liveCert {
 		TLSVersion:  tlsVersionStr(st.Version),
 		CipherSuite: tls.CipherSuiteName(st.CipherSuite),
 		ChainLen:    len(st.PeerCertificates),
-		// The InsecureSkipVerify means we can't claim verified=true,
-		// even though the state carries VerifiedChains from handshake.
-		Verified: len(st.VerifiedChains) > 0,
+		Verified:    len(st.VerifiedChains) > 0,
 	}
 	if len(st.PeerCertificates) == 0 {
 		return out
@@ -245,4 +230,16 @@ func tlsVersionStr(v uint16) string {
 		return "TLS 1.3"
 	}
 	return fmt.Sprintf("unknown(0x%04x)", v)
+}
+
+func mapIntKeys(m map[string]int, limit int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if limit > 0 && len(keys) > limit {
+		keys = keys[:limit]
+	}
+	return keys
 }
