@@ -83,7 +83,7 @@ func Run(target string) (*core.Result, error) {
 		if count >= 2 {
 			r.Add(core.Finding{
 				Tool: "shadowtrace", Severity: core.SevMed,
-				Title: "corroborated across sources",
+				Title:  "corroborated across sources",
 				Detail: fmt.Sprintf("%s (%d sources)", h, count),
 			})
 		}

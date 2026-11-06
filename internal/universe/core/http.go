@@ -4,18 +4,23 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"net/http"
 	"time"
 )
 
-var client = &http.Client{
-	Timeout: 15 * time.Second,
+var ErrResponseTooLarge = errors.New("response exceeds max body size")
+
+const MaxBodySize int64 = 16 << 20
+
+var verifiedClient = &http.Client{
+	Timeout: 30 * time.Second,
 	Transport: &http.Transport{
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 10,
 		IdleConnTimeout:     30 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
 	},
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
@@ -25,7 +30,24 @@ var client = &http.Client{
 	},
 }
 
-func HTTPGet(ctx context.Context, url string, headers map[string]string) (int, http.Header, []byte, error) {
+var insecureClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     30 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+	},
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return http.ErrUseLastResponse
+		}
+		return nil
+	},
+}
+
+func doGet(ctx context.Context, client *http.Client, url string, headers map[string]string) (int, http.Header, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return 0, nil, nil, err
@@ -39,11 +61,17 @@ func HTTPGet(ctx context.Context, url string, headers map[string]string) (int, h
 		return 0, nil, nil, err
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	return resp.StatusCode, resp.Header, b, err
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxBodySize+1))
+	if err != nil {
+		return resp.StatusCode, resp.Header, nil, err
+	}
+	if int64(len(body)) > MaxBodySize {
+		return resp.StatusCode, resp.Header, nil, ErrResponseTooLarge
+	}
+	return resp.StatusCode, resp.Header, body, nil
 }
 
-func HTTPPost(ctx context.Context, url, ct string, body []byte, headers map[string]string) (int, []byte, error) {
+func doPost(ctx context.Context, client *http.Client, url, ct string, body []byte, headers map[string]string) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err
@@ -58,6 +86,24 @@ func HTTPPost(ctx context.Context, url, ct string, body []byte, headers map[stri
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
-	return resp.StatusCode, b, err
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, MaxBodySize+1))
+	if err != nil {
+		return resp.StatusCode, nil, err
+	}
+	if int64(len(respBody)) > MaxBodySize {
+		return resp.StatusCode, nil, ErrResponseTooLarge
+	}
+	return resp.StatusCode, respBody, nil
+}
+
+func HTTPGet(ctx context.Context, url string, headers map[string]string) (int, http.Header, []byte, error) {
+	return doGet(ctx, verifiedClient, url, headers)
+}
+
+func HTTPGetInsecure(ctx context.Context, url string, headers map[string]string) (int, http.Header, []byte, error) {
+	return doGet(ctx, insecureClient, url, headers)
+}
+
+func HTTPPost(ctx context.Context, url, ct string, body []byte, headers map[string]string) (int, []byte, error) {
+	return doPost(ctx, verifiedClient, url, ct, body, headers)
 }

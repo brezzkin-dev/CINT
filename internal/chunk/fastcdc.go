@@ -5,6 +5,7 @@
 // FastCDC improves on pure Gear-hash chunking by using two masks:
 //   - a *strict* mask in [min, avg) so chunks don't cut too early,
 //   - a *loose* mask in [avg, max) so chunks don't grow too large.
+//
 // The result is a tighter chunk-size distribution around `avg`, which is
 // better for deduplication because it produces fewer tiny/large outliers.
 package chunk

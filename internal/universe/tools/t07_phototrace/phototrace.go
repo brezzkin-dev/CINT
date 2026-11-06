@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"image"
 	_ "image/gif"
-	"image/jpeg"
+	_ "image/jpeg"
 	_ "image/png"
 	"os"
 	"strings"
@@ -36,23 +36,29 @@ type Report struct {
 
 func Run(path string, opts Options) (*core.Result, error) {
 	r := core.NewResult("phototrace", path)
+
 	stat, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
+
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
+
 	img, fmtName, err := image.Decode(f)
 	if err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
 	bounds := img.Bounds()
+
 	report := &Report{
-		File: path, Format: fmtName,
-		Dimensions: [2]int{bounds.Dx(), bounds.Dy()}, Bytes: stat.Size(),
+		File:       path,
+		Format:     fmtName,
+		Dimensions: [2]int{bounds.Dx(), bounds.Dy()},
+		Bytes:      stat.Size(),
 	}
 	r.AddExtra("format", fmtName)
 	r.AddExtra("width", bounds.Dx())
@@ -78,15 +84,20 @@ func Run(path string, opts Options) (*core.Result, error) {
 	}
 
 	ela, err := ELA(path, img)
-	if err == nil && ela != nil {
+	if err == nil {
 		report.ELA = ela
 		r.AddExtra("ela", ela)
 		if ela.AnomalousRatio > 0.15 {
 			r.Add(core.Finding{
 				Tool: "phototrace", Severity: core.SevHigh,
 				Title: "ELA anomaly detected",
-				Detail: fmt.Sprintf("%.1f%% pixels anomalous", ela.AnomalousRatio*100),
-				Evidence: map[string]any{"anomalous_ratio": ela.AnomalousRatio, "max_diff": ela.MaxDiff},
+				Detail: fmt.Sprintf("%.1f%% pixels anomalous (heuristic — likely splice/airbrush)",
+					ela.AnomalousRatio*100),
+				Evidence: map[string]any{
+					"anomalous_ratio": ela.AnomalousRatio,
+					"max_diff":        ela.MaxDiff,
+					"mean_diff":       ela.MeanDiff,
+				},
 			})
 			report.Score += 30
 		}
@@ -99,7 +110,9 @@ func Run(path string, opts Options) (*core.Result, error) {
 		r.Add(core.Finding{
 			Tool: "phototrace", Severity: core.SevHigh,
 			Title: "Noise variance heterogeneous",
-			Detail: fmt.Sprintf("score %.2f", noise.HeterogeneityScore),
+			Detail: fmt.Sprintf("score %.2f — inconsistent noise across regions (heuristic)",
+				noise.HeterogeneityScore),
+			Evidence: map[string]any{"score": noise.HeterogeneityScore},
 		})
 		report.Score += 25
 	}
@@ -110,8 +123,9 @@ func Run(path string, opts Options) (*core.Result, error) {
 	if chroma != nil && chroma.ChannelDiscrepancy > 0.4 {
 		r.Add(core.Finding{
 			Tool: "phototrace", Severity: core.SevMed,
-			Title: "Chromatic aberration inconsistent",
-			Detail: fmt.Sprintf("discrepancy %.2f", chroma.ChannelDiscrepancy),
+			Title:    "Chromatic aberration inconsistent",
+			Detail:   fmt.Sprintf("RGB edge misalignment %.2f (heuristic)", chroma.ChannelDiscrepancy),
+			Evidence: map[string]any{"discrepancy": chroma.ChannelDiscrepancy},
 		})
 		report.Score += 15
 	}
@@ -124,21 +138,27 @@ func Run(path string, opts Options) (*core.Result, error) {
 			if dj != nil && dj.LikelyDouble {
 				r.Add(core.Finding{
 					Tool: "phototrace", Severity: core.SevHigh,
-					Title: "Double JPEG compression suspected",
+					Title:    "Double JPEG compression suspected",
+					Detail:   "AC coefficient histogram shows double-peak pattern (heuristic)",
+					Evidence: map[string]any{"peak_ratio": dj.PeakRatio, "confidence": dj.Confidence},
 				})
 				report.Score += 25
 			}
 		}
+
 		cm := DetectCopyMove(img)
 		report.CopyMove = cm
 		r.AddExtra("copy_move", cm)
 		if cm != nil && len(cm.Regions) > 0 {
 			r.Add(core.Finding{
 				Tool: "phototrace", Severity: core.SevHigh,
-				Title: fmt.Sprintf("Copy-move: %d duplicate regions", len(cm.Regions)),
+				Title:    fmt.Sprintf("Copy-move: %d duplicate regions", len(cm.Regions)),
+				Detail:   "identical block hashes found at multiple positions (heuristic)",
+				Evidence: map[string]any{"regions": cm.Regions},
 			})
 			report.Score += 35
 		}
+
 		ghosts := JPEGGhost(img)
 		report.Ghost = ghosts
 		r.AddExtra("ghost", ghosts)
@@ -147,7 +167,9 @@ func Run(path string, opts Options) (*core.Result, error) {
 				r.Add(core.Finding{
 					Tool: "phototrace", Severity: core.SevMed,
 					Title: fmt.Sprintf("JPEG ghost at Q=%d", g.Quality),
-					Detail: fmt.Sprintf("%d/%d anomalous cells", g.AnomalousCells, g.TotalCells),
+					Detail: fmt.Sprintf("%d/%d cells show prior-compression mismatch (heuristic)",
+						g.AnomalousCells, g.TotalCells),
+					Evidence: map[string]any{"quality": g.Quality, "anomalous": g.AnomalousCells},
 				})
 				report.Score += 10
 			}
@@ -156,24 +178,32 @@ func Run(path string, opts Options) (*core.Result, error) {
 
 	switch {
 	case report.Score >= 60:
-		report.Verdict = "highly likely tampered"
+		report.Verdict = "heuristic indicators: strong (multiple signals — validate manually)"
 	case report.Score >= 30:
-		report.Verdict = "suspicious — possible manipulation"
+		report.Verdict = "heuristic indicators: moderate (some signals — validate manually)"
 	case report.Score >= 10:
-		report.Verdict = "minor anomalies"
+		report.Verdict = "heuristic indicators: minor"
 	default:
-		report.Verdict = "no manipulation detected"
+		report.Verdict = "heuristic indicators: none observed"
 	}
+
 	r.AddExtra("report", report)
 	r.AddExtra("tamper_score", report.Score)
 	r.AddExtra("verdict", report.Verdict)
+	r.AddExtra("verdict_note",
+		"heuristic signals only — not forensic proof. Recompression, resizing, "+
+			"and normal editing produce identical patterns. Cross-check with the "+
+			"original source and validate manually.")
+	r.AddExtra("inconsistencies", report.Inconsistency)
+
 	if len(report.Inconsistency) > 0 {
 		r.Add(core.Finding{
 			Tool: "phototrace", Severity: core.SevMed,
-			Title: "EXIF / DQT inconsistencies", Detail: strings.Join(report.Inconsistency, "; "),
+			Title:  "EXIF / DQT inconsistencies",
+			Detail: strings.Join(report.Inconsistency, "; "),
 		})
 	}
-	_ = jpeg.DefaultQuality
+
 	r.Finish()
 	return r, nil
 }
@@ -181,12 +211,15 @@ func Run(path string, opts Options) (*core.Result, error) {
 func checkEXIFConsistency(exif map[string]any, r *core.Result, out *[]string) {
 	if sw, ok := exif["Software"].(string); ok && sw != "" {
 		low := strings.ToLower(sw)
-		for _, ed := range []string{"photoshop", "gimp", "lightroom", "pixlr"} {
-			if strings.Contains(low, ed) {
-				*out = append(*out, "edited with "+sw)
-				r.Add(core.Finding{Tool: "phototrace", Severity: core.SevMed, Title: "Image edited with " + sw})
-				break
-			}
+		if strings.Contains(low, "photoshop") ||
+			strings.Contains(low, "gimp") ||
+			strings.Contains(low, "lightroom") ||
+			strings.Contains(low, "pixlr") {
+			*out = append(*out, "edited with "+sw)
+			r.Add(core.Finding{
+				Tool: "phototrace", Severity: core.SevMed,
+				Title: "Image edited with " + sw,
+			})
 		}
 	}
 	if dt, ok := exif["DateTime"].(string); ok {
@@ -208,6 +241,17 @@ func checkDQTAnomalies(dqt []int, r *core.Result, out *[]string) {
 	if avg < 2 {
 		*out = append(*out, "extremely high quality (avg DQT < 2)")
 	} else if avg > 40 {
-		*out = append(*out, "very low quality (avg DQT > 40)")
+		*out = append(*out, "very low quality (avg DQT > 40) — heavy compression")
+	}
+	if dqt[0] > 30 {
+		*out = append(*out, "DC coefficient unusually large")
+	}
+}
+
+func sortRegionsByConfidence(rs []Region) {
+	for i := 1; i < len(rs); i++ {
+		for j := i; j > 0 && rs[j].Score > rs[j-1].Score; j-- {
+			rs[j], rs[j-1] = rs[j-1], rs[j]
+		}
 	}
 }

@@ -60,8 +60,8 @@ func parseAuthLog(path string, r *core.Result, events *[]Event) {
 		if sev.Rank() >= core.SevHigh.Rank() {
 			r.Add(core.Finding{
 				Tool: "dfir", Severity: sev,
-				Title: "Suspicious auth event",
-				Detail: line,
+				Title:    "Suspicious auth event",
+				Detail:   line,
 				Evidence: map[string]any{"ts": ts.Format(time.RFC3339)},
 			})
 		}
@@ -128,7 +128,7 @@ func parseCron(r *core.Result, events *[]Event) {
 			if strings.Contains(line, "wget") || strings.Contains(line, "curl") || strings.Contains(line, "base64") {
 				r.Add(core.Finding{
 					Tool: "dfir", Severity: core.SevHigh,
-					Title: "Suspicious cron entry",
+					Title:  "Suspicious cron entry",
 					Detail: p + ": " + line,
 				})
 			}

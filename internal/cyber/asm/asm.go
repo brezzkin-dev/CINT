@@ -165,8 +165,8 @@ func Map(ctx context.Context, domain string, fullPorts bool) *core.Result {
 		}
 		r.Add(core.Finding{
 			Tool: "asm", Severity: sev,
-			Title: fmt.Sprintf("Open port %d", svc.Port),
-			Detail: svc.Banner,
+			Title:    fmt.Sprintf("Open port %d", svc.Port),
+			Detail:   svc.Banner,
 			Evidence: map[string]any{"host": svc.Host, "tls": svc.TLS},
 		})
 	}

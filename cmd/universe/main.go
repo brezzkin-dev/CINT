@@ -664,4 +664,3 @@ func cmdIPNexus(args []string) {
 	}
 	emit(r, *out)
 }
-

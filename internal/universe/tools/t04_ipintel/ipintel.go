@@ -22,7 +22,7 @@ func Run(ip string) (*core.Result, error) {
 			r.AddExtra("geo", out)
 			if cc, ok := out["countryCode"].(string); ok && cc != "" {
 				r.Add(core.Finding{Tool: "ipintel", Severity: core.SevInfo,
-					Title: "Geo: " + fmt.Sprint(out["city"]) + ", " + fmt.Sprint(out["country"]),
+					Title:  "Geo: " + fmt.Sprint(out["city"]) + ", " + fmt.Sprint(out["country"]),
 					Detail: fmt.Sprint(out["as"])})
 			}
 		}

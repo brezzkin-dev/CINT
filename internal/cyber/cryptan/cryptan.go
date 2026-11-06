@@ -102,8 +102,8 @@ func Crack(hash string, wordlistPath string) *core.Result {
 		if subtle.ConstantTimeCompare([]byte(h), []byte(target)) == 1 {
 			r.Add(core.Finding{
 				Tool: "cryptan", Severity: core.SevHigh,
-				Title: "hash cracked",
-				Detail: fmt.Sprintf("%q (%d attempts)", word, tried),
+				Title:    "hash cracked",
+				Detail:   fmt.Sprintf("%q (%d attempts)", word, tried),
 				Evidence: map[string]any{"plaintext": word, "attempts": tried},
 			})
 			r.Finish()
@@ -233,11 +233,11 @@ func FreqAnalysis(s string) *core.Result {
 	r.AddExtra("chi_square", chi)
 	if chi < 50 {
 		r.Add(core.Finding{Tool: "cryptan", Severity: core.SevInfo,
-			Title: "likely English plaintext",
+			Title:  "likely English plaintext",
 			Detail: fmt.Sprintf("chi-square %.2f", chi)})
 	} else {
 		r.Add(core.Finding{Tool: "cryptan", Severity: core.SevMed,
-			Title: "unlikely English (substitution cipher or foreign)",
+			Title:  "unlikely English (substitution cipher or foreign)",
 			Detail: fmt.Sprintf("chi-square %.2f", chi)})
 	}
 	r.Finish()
@@ -310,7 +310,7 @@ func BreakXOR(ct []byte) *core.Result {
 	}
 	r.AddExtra("plaintext_preview", preview)
 	r.Add(core.Finding{Tool: "cryptan", Severity: core.SevHigh,
-		Title: fmt.Sprintf("XOR key 0x%02x (chi=%.1f)", bestKey, bestScore),
+		Title:  fmt.Sprintf("XOR key 0x%02x (chi=%.1f)", bestKey, bestScore),
 		Detail: preview})
 	r.Finish()
 	return r
@@ -409,7 +409,7 @@ func BreakVigenere(ct string) *core.Result {
 	}
 	r.AddExtra("plaintext_preview", preview)
 	r.Add(core.Finding{Tool: "cryptan", Severity: core.SevHigh,
-		Title: fmt.Sprintf("Vigenere key %q (len=%d)", string(key), bestLen),
+		Title:  fmt.Sprintf("Vigenere key %q (len=%d)", string(key), bestLen),
 		Detail: preview})
 	r.Finish()
 	return r
@@ -484,7 +484,7 @@ func DetectECB(data []byte) *core.Result {
 	r.AddExtra("duplicate_blocks", dups)
 	if dups > 0 {
 		r.Add(core.Finding{Tool: "cryptan", Severity: core.SevHigh,
-			Title: fmt.Sprintf("ECB mode likely (%d repeated blocks)", dups),
+			Title:  fmt.Sprintf("ECB mode likely (%d repeated blocks)", dups),
 			Detail: "identical ciphertext blocks indicate ECB"})
 	} else {
 		r.Add(core.Finding{Tool: "cryptan", Severity: core.SevInfo, Title: "no repeated blocks (not ECB or insufficient data)"})

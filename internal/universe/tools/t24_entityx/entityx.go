@@ -176,7 +176,7 @@ func Run(inputs []string, minCount int) (*core.Result, error) {
 		if e, ok := entities[ranks[i].key]; ok {
 			r.Add(core.Finding{
 				Tool: "entityx", Severity: core.SevInfo,
-				Title: "high-degree " + e.Type,
+				Title:  "high-degree " + e.Type,
 				Detail: fmt.Sprintf("%s (%d co-occurrences)", e.Value, ranks[i].count),
 			})
 		}

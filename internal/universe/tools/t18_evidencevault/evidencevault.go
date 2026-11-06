@@ -8,155 +8,236 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	core "github.com/ollie/phantomfs/internal/universe/core"
 )
 
+var vaultLock sync.Mutex
+
 type Entry struct {
-	ID        string `json:"id"`
-	Label     string `json:"label"`
-	OrigName  string `json:"orig_name"`
-	Size      int64  `json:"size"`
-	MD5       string `json:"md5"`
-	SHA256    string `json:"sha256"`
-	MTime     string `json:"mtime"`
-	AddedAt   string `json:"added_at"`
-	BlobPath  string `json:"blob_path"`
-	PrevHash  string `json:"prev_hash"`
-	ThisHash  string `json:"this_hash"`
+	AddedAt    string `json:"added_at"`
+	AddedBy    string `json:"added_by"`
+	Hostname   string `json:"hostname"`
+	Label      string `json:"label,omitempty"`
+	SourcePath string `json:"source_path"`
+	Size       int64  `json:"size"`
+	MTime      string `json:"mtime"`
+	SHA256     string `json:"sha256"`
+	MD5        string `json:"md5_legacy"`
+	BlobPath   string `json:"blob_path"`
+	PrevHash   string `json:"prev_hash"`
+	ThisHash   string `json:"this_hash"`
 }
 
 type Manifest struct {
+	Version string  `json:"version"`
 	Created string  `json:"created"`
 	Entries []Entry `json:"entries"`
 }
 
-func vaultPaths(root string) (manifest, blobs string) {
-	return filepath.Join(root, "manifest.json"), filepath.Join(root, "blobs")
-}
-
 func Init(vault string) (*core.Result, error) {
 	r := core.NewResult("evidencevault-init", vault)
-	if err := os.MkdirAll(filepath.Join(vault, "blobs"), 0755); err != nil {
+	blobs := filepath.Join(vault, "blobs")
+	if err := os.MkdirAll(blobs, 0700); err != nil {
+		return r, fmt.Errorf("mkdir blobs: %w", err)
+	}
+	mfPath := filepath.Join(vault, "manifest.json")
+	if _, err := os.Stat(mfPath); err == nil {
+		r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevMed,
+			Title: "Vault already exists", Detail: mfPath})
+		r.Finish()
+		return r, nil
+	}
+	mf := Manifest{Version: "1.1", Created: nowUTC()}
+	if err := atomicWriteJSON(mfPath, mf); err != nil {
 		return r, err
 	}
-	m := Manifest{Created: time.Now().UTC().Format(time.RFC3339), Entries: []Entry{}}
-	if err := saveManifest(vault, &m); err != nil {
+	chainPath := filepath.Join(vault, "chain.log")
+	if err := atomicWriteFile(chainPath, nil); err != nil {
 		return r, err
 	}
-	r.AddExtra("vault", vault)
-	r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevInfo, Title: "Vault initialized"})
+	r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevInfo,
+		Title: "Vault initialized", Detail: vault})
+	r.AddExtra("manifest", mfPath)
 	r.Finish()
 	return r, nil
 }
 
-func Add(vault, file, label string) (*core.Result, error) {
-	r := core.NewResult("evidencevault-add", file)
-	m, err := loadManifest(vault)
-	if err != nil {
-		return r, fmt.Errorf("load manifest: %w (run init first?)", err)
-	}
-	stat, err := os.Stat(file)
-	if err != nil {
-		return r, err
-	}
-	f, err := os.Open(file)
-	if err != nil {
-		return r, err
-	}
-	defer f.Close()
+func Add(vault, path, label string) (*core.Result, error) {
+	r := core.NewResult("evidencevault-add", path)
+	vaultLock.Lock()
+	defer vaultLock.Unlock()
 
-	h256 := sha256.New()
-	hmd5 := md5.New()
-	w := io.MultiWriter(h256, hmd5)
-	if _, err := io.Copy(w, f); err != nil {
+	mf, err := loadManifest(vault)
+	if err != nil {
 		return r, err
 	}
-	sha := hex.EncodeToString(h256.Sum(nil))
-	md := hex.EncodeToString(hmd5.Sum(nil))
 
-	// Content-addressed blob
-	blobDir := filepath.Join(vault, "blobs", sha[:2])
-	os.MkdirAll(blobDir, 0755)
-	blobPath := filepath.Join(blobDir, sha)
-	if _, err := os.Stat(blobPath); os.IsNotExist(err) {
-		src, _ := os.Open(file)
-		dst, err := os.Create(blobPath)
-		if err != nil {
-			return r, err
+	stat, err := os.Stat(path)
+	if err != nil {
+		return r, fmt.Errorf("stat: %w", err)
+	}
+
+	sha, md, size, err := hashFile(path)
+	if err != nil {
+		return r, err
+	}
+	if size != stat.Size() {
+		return r, fmt.Errorf("hash size %d != stat size %d", size, stat.Size())
+	}
+
+	blobRel := filepath.Join("blobs", sha)
+	blobAbs := filepath.Join(vault, blobRel)
+	if _, err := os.Stat(blobAbs); os.IsNotExist(err) {
+		if err := copyFile(path, blobAbs); err != nil {
+			return r, fmt.Errorf("copy blob: %w", err)
 		}
-		io.Copy(dst, src)
-		src.Close()
-		dst.Close()
+	} else if err != nil {
+		return r, fmt.Errorf("stat blob: %w", err)
 	}
 
-	prev := ""
-	if len(m.Entries) > 0 {
-		prev = m.Entries[len(m.Entries)-1].ThisHash
+	prev := "genesis"
+	if len(mf.Entries) > 0 {
+		prev = mf.Entries[len(mf.Entries)-1].ThisHash
 	}
+
+	usr, _ := user.Current()
+	who := ""
+	if usr != nil {
+		who = usr.Username
+	}
+	host, _ := os.Hostname()
+
 	entry := Entry{
-		ID: fmt.Sprintf("%04d", len(m.Entries)+1), Label: label,
-		OrigName: filepath.Base(file), Size: stat.Size(),
-		MD5: md, SHA256: sha, MTime: stat.ModTime().UTC().Format(time.RFC3339),
-		AddedAt: time.Now().UTC().Format(time.RFC3339),
-		BlobPath: blobPath, PrevHash: prev,
+		AddedAt: nowUTC(), AddedBy: who, Hostname: host,
+		Label: label, SourcePath: path,
+		Size: size, MTime: stat.ModTime().UTC().Format(time.RFC3339),
+		SHA256: sha, MD5: md, BlobPath: blobRel, PrevHash: prev,
 	}
 	entry.ThisHash = chainHash(entry)
-	m.Entries = append(m.Entries, entry)
-	if err := saveManifest(vault, m); err != nil {
-		return r, err
+
+	mf.Entries = append(mf.Entries, entry)
+	if err := atomicWriteJSON(filepath.Join(vault, "manifest.json"), mf); err != nil {
+		return r, fmt.Errorf("write manifest: %w", err)
 	}
-	r.AddExtra("entry", entry)
+
+	line, _ := json.Marshal(entry)
+	f, err := os.OpenFile(filepath.Join(vault, "chain.log"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return r, fmt.Errorf("open chain.log: %w", err)
+	}
+	if _, werr := f.Write(append(line, '\n')); werr != nil {
+		f.Close()
+		return r, fmt.Errorf("append chain.log: %w", werr)
+	}
+	if serr := f.Sync(); serr != nil {
+		f.Close()
+		return r, fmt.Errorf("sync chain.log: %w", serr)
+	}
+	if cerr := f.Close(); cerr != nil {
+		return r, fmt.Errorf("close chain.log: %w", cerr)
+	}
+
 	r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevInfo,
-		Title: "Evidence added", Detail: entry.ID + " " + entry.SHA256[:16]})
+		Title:    "Evidence added",
+		Detail:   fmt.Sprintf("%s → %s", path, sha[:16]),
+		Evidence: map[string]any{"sha256": sha, "this_hash": entry.ThisHash}})
+	r.AddExtra("entry", entry)
 	r.Finish()
 	return r, nil
 }
 
 func Verify(vault string) (*core.Result, error) {
 	r := core.NewResult("evidencevault-verify", vault)
-	m, err := loadManifest(vault)
+	mf, err := loadManifest(vault)
 	if err != nil {
 		return r, err
 	}
-	ok, broken := 0, 0
-	prev := ""
-	for i, e := range m.Entries {
-		expected := chainHash(Entry{
-			ID: e.ID, Label: e.Label, OrigName: e.OrigName, Size: e.Size,
-			MD5: e.MD5, SHA256: e.SHA256, MTime: e.MTime, AddedAt: e.AddedAt,
-			BlobPath: e.BlobPath, PrevHash: prev,
-		})
-		if e.PrevHash != prev || e.ThisHash != expected {
+
+	prev := "genesis"
+	broken := 0
+	var results []map[string]any
+	blobRoot := filepath.Join(vault, "blobs")
+	blobRootAbs, _ := filepath.Abs(blobRoot)
+
+	for _, e := range mf.Entries {
+		status := "ok"
+
+		canonicalRel := filepath.Join("blobs", e.SHA256)
+		canonicalAbs := filepath.Join(vault, canonicalRel)
+		absPath, aerr := filepath.Abs(canonicalAbs)
+		if aerr != nil || !strings.HasPrefix(absPath, blobRootAbs+string(filepath.Separator)) {
+			status = "path_escape"
 			broken++
 			r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevCrit,
-				Title: fmt.Sprintf("Chain break at entry %d (%s)", i+1, e.ID),
-				Detail: "hash mismatch — possible tampering"})
-		} else {
-			ok++
+				Title: "Manifest blob path escapes vault", Detail: e.SHA256})
+			results = append(results, map[string]any{"sha256": e.SHA256, "status": status})
+			continue
 		}
-		// Verify blob exists and matches
-		if data, err := os.ReadFile(e.BlobPath); err == nil {
-			got := hex.EncodeToString(sha256Sum(data))
-			if got != e.SHA256 {
+
+		f, oErr := os.Open(absPath)
+		if oErr != nil {
+			status = "missing_blob"
+			broken++
+			r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevCrit,
+				Title: "Missing blob", Detail: e.SHA256})
+			results = append(results, map[string]any{"sha256": e.SHA256, "status": status})
+		} else {
+			h := sha256.New()
+			written, cpErr := io.Copy(h, f)
+			closeErr := f.Close()
+			if cpErr != nil || closeErr != nil {
+				status = "read_error"
+				broken++
+			} else if written != e.Size {
+				status = "size_mismatch"
 				broken++
 				r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevCrit,
-					Title: "Blob hash mismatch: " + e.ID})
+					Title:    "Blob size mismatch",
+					Evidence: map[string]any{"expected": e.Size, "got": written}})
+			} else if hex.EncodeToString(h.Sum(nil)) != e.SHA256 {
+				status = "hash_mismatch"
+				broken++
+				r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevCrit,
+					Title: "Blob hash mismatch (tampered)", Detail: e.SHA256})
 			}
-		} else {
+			results = append(results, map[string]any{"sha256": e.SHA256, "status": status})
+		}
+
+		if e.PrevHash != prev {
+			status = "chain_broken"
 			broken++
-			r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevHigh,
-				Title: "Missing blob: " + e.ID, Detail: e.BlobPath})
+			r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevCrit,
+				Title: "Chain broken", Detail: e.SHA256})
+		}
+		recomputed := chainHash(Entry{
+			AddedAt: e.AddedAt, AddedBy: e.AddedBy, Hostname: e.Hostname,
+			Label: e.Label, SourcePath: e.SourcePath, Size: e.Size,
+			MTime: e.MTime, SHA256: e.SHA256, MD5: e.MD5,
+			BlobPath: e.BlobPath, PrevHash: e.PrevHash,
+		})
+		if recomputed != e.ThisHash {
+			status = "chain_hash_mismatch"
+			broken++
+			r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevCrit,
+				Title: "Chain hash mismatch", Detail: e.SHA256})
 		}
 		prev = e.ThisHash
 	}
-	r.AddExtra("verified_ok", ok)
+
+	r.AddExtra("entries", results)
+	r.AddExtra("total", len(mf.Entries))
 	r.AddExtra("broken", broken)
-	r.AddExtra("total", len(m.Entries))
 	if broken == 0 {
-		r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevInfo, Title: "Chain intact"})
+		r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevInfo,
+			Title: fmt.Sprintf("Vault clean: %d entries verified", len(mf.Entries))})
 	}
 	r.Finish()
 	return r, nil
@@ -164,45 +245,118 @@ func Verify(vault string) (*core.Result, error) {
 
 func List(vault string) (*core.Result, error) {
 	r := core.NewResult("evidencevault-list", vault)
-	m, err := loadManifest(vault)
+	mf, err := loadManifest(vault)
 	if err != nil {
 		return r, err
 	}
-	r.AddExtra("created", m.Created)
-	r.AddExtra("entries", m.Entries)
-	r.AddExtra("count", len(m.Entries))
+	entries := mf.Entries
+	sort.Slice(entries, func(i, j int) bool { return entries[i].AddedAt < entries[j].AddedAt })
+	r.AddExtra("entries", entries)
+	r.AddExtra("count", len(entries))
+	r.Add(core.Finding{Tool: "evidencevault", Severity: core.SevInfo,
+		Title: fmt.Sprintf("%d entries in vault", len(entries))})
 	r.Finish()
 	return r, nil
 }
 
-func chainHash(e Entry) string {
-	// SHA256(prev || id || label || name || size || md5 || sha256 || mtime || added || blob)
-	h := sha256.New()
-	fmt.Fprintf(h, "%s|%s|%s|%s|%d|%s|%s|%s|%s|%s",
-		e.PrevHash, e.ID, e.Label, e.OrigName, e.Size, e.MD5, e.SHA256, e.MTime, e.AddedAt, e.BlobPath)
-	return hex.EncodeToString(h.Sum(nil))
-}
-
 func loadManifest(vault string) (*Manifest, error) {
-	path, _ := vaultPaths(vault)
-	data, err := os.ReadFile(path)
+	p := filepath.Join(vault, "manifest.json")
+	b, err := os.ReadFile(p)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read manifest: %w", err)
 	}
-	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, err
+	var mf Manifest
+	if err := json.Unmarshal(b, &mf); err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
-	return &m, nil
+	return &mf, nil
 }
 
-func saveManifest(vault string, m *Manifest) error {
-	path, _ := vaultPaths(vault)
-	b, err := json.MarshalIndent(m, "", "  ")
+func hashFile(p string) (sha, md string, size int64, err error) {
+	f, err := os.Open(p)
+	if err != nil {
+		return "", "", 0, err
+	}
+	defer f.Close()
+	h1 := sha256.New()
+	h2 := md5.New()
+	n, cpErr := io.Copy(io.MultiWriter(h1, h2), f)
+	if cpErr != nil {
+		return "", "", 0, cpErr
+	}
+	return hex.EncodeToString(h1.Sum(nil)), hex.EncodeToString(h2.Sum(nil)), n, nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0644)
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
-func sha256Sum(b []byte) []byte { h := sha256.Sum256(b); return h[:] }
+func atomicWriteJSON(p string, v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(p, b)
+}
+
+func atomicWriteFile(p string, b []byte) error {
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, p)
+}
+
+func chainHash(e Entry) string {
+	h := sha256.New()
+	parts := []string{
+		e.AddedAt, e.AddedBy, e.Hostname, e.Label, e.SourcePath,
+		fmt.Sprintf("%d", e.Size), e.MTime, e.SHA256, e.MD5,
+		e.BlobPath, e.PrevHash,
+	}
+	for _, p := range parts {
+		h.Write([]byte(p))
+		h.Write([]byte("\x00"))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func nowUTC() string { return time.Now().UTC().Format(time.RFC3339) }

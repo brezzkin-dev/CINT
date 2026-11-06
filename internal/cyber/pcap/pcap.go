@@ -89,7 +89,7 @@ func parseFrame(pkt []byte) (proto uint8, srcIP, dstIP string, sport, dport uint
 		}
 		sport = binary.BigEndian.Uint16(l4[0:2])
 		dport = binary.BigEndian.Uint16(l4[2:4])
-		doff := int((l4[12] >> 4) & 0x0f) * 4
+		doff := int((l4[12]>>4)&0x0f) * 4
 		if len(l4) >= doff {
 			payload = l4[doff:]
 		}
@@ -182,8 +182,8 @@ func Analyze(path string) (*core.Result, error) {
 	if len(creds) > 0 {
 		r.Add(core.Finding{
 			Tool: "pcap", Severity: core.SevCrit,
-			Title: fmt.Sprintf("%d credentials in cleartext", len(creds)),
-			Detail: "passwords transmitted without encryption",
+			Title:    fmt.Sprintf("%d credentials in cleartext", len(creds)),
+			Detail:   "passwords transmitted without encryption",
 			Evidence: map[string]any{"creds": creds},
 		})
 	}

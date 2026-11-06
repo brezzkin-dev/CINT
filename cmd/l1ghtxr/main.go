@@ -23,9 +23,9 @@ import (
 	"github.com/ollie/phantomfs/internal/cyber/wsa"
 )
 
-const version = "1.0.0"
+const version = "1.0.1"
 
-var banner = `
+const banner = `
    __    _  __     __  __     __  __
   / /   (_)/ /_   / / / /_   / / / /___
  / /   / // __ \ / /_/ / /  / /_/ / __ \
@@ -65,7 +65,7 @@ func dispatch(cmd string, args []string) {
 	case "vulnintel":
 		cmdVulnIntel(args)
 	case "version", "-v", "--version":
-		fmt.Println("l1ghtxr", version)
+		fmt.Printf("l1ghtxr v%s\n", version)
 	case "help", "-h", "--help":
 		help()
 	case "exit", "quit":
@@ -73,7 +73,7 @@ func dispatch(cmd string, args []string) {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown: %s\n", cmd)
 		help()
-		os.Exit(1)
+		os.Exit(2)
 	}
 }
 
@@ -82,10 +82,10 @@ func help() {
 	fmt.Print(`
 tools:
   intel        [-file iocs.txt | -ioc ip,domain,hash] [-out report.json]
-  malscope     -file sample.bin [-out report.json]
+  malscope     -file sample.bin [-yara custom.yara] [-out report.json]
   dfir         [-root /] [-out report.json]
-  asm          -domain example.com [-out report.json]
-  wsa          -url https://example.com [-out report.json]
+  asm          -domain example.com [-full-ports] [-out report.json]
+  wsa          -url https://target [-inject] [-takeover] [-out report.json]
   pcap         -file capture.pcap [-out report.json]
   cryptan      {id|crack|jwt|encrypt|decrypt|freq} [flags]
   sysaudit     [-root /] [-out report.json]
@@ -115,16 +115,20 @@ func interactive() {
 func emit(r *core.Result, out string) {
 	r.Finish()
 	if out != "" {
-		_ = r.SaveJSON(out)
+		if err := r.SaveJSON(out); err != nil {
+			fmt.Fprintf(os.Stderr, "save failed: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Fprintf(os.Stderr, "saved: %s\n", out)
 	}
-	b, _ := json.MarshalIndent(map[string]any{
-		"tool":     r.Tool,
-		"target":   r.Target,
-		"summary":  r.Summary(),
-		"findings": r.Findings,
-		"extra":    r.Extra,
+	b, err := json.MarshalIndent(map[string]any{
+		"tool": r.Tool, "target": r.Target,
+		"summary": r.Summary(), "findings": r.Findings, "extra": r.Extra,
 	}, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "marshal failed: %v\n", err)
+		os.Exit(1)
+	}
 	os.Stdout.Write(b)
 	os.Stdout.Write([]byte("\n"))
 }
@@ -139,11 +143,13 @@ func cmdIntel(args []string) {
 	var iocs []string
 	if *file != "" {
 		b, err := os.ReadFile(*file)
-		if err == nil {
-			for _, l := range strings.Split(string(b), "\n") {
-				if l = strings.TrimSpace(l); l != "" {
-					iocs = append(iocs, l)
-				}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		for _, l := range strings.Split(string(b), "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				iocs = append(iocs, l)
 			}
 		}
 	}
@@ -156,7 +162,7 @@ func cmdIntel(args []string) {
 	}
 	if len(iocs) == 0 {
 		fmt.Fprintln(os.Stderr, "intel: -file or -ioc required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	emit(intel.Enrich(context.Background(), iocs), *out)
 }
@@ -164,13 +170,14 @@ func cmdIntel(args []string) {
 func cmdMalscope(args []string) {
 	fs := flag.NewFlagSet("malscope", flag.ExitOnError)
 	file := fs.String("file", "", "binary to analyze")
+	yaraPath := fs.String("yara", "", "custom YARA-lite rules file")
 	out := fs.String("out", "", "output JSON report")
 	_ = fs.Parse(args)
 	if *file == "" {
 		fmt.Fprintln(os.Stderr, "malscope: -file required")
-		os.Exit(1)
+		os.Exit(2)
 	}
-	r, err := malscope.Analyze(*file)
+	r, err := malscope.Analyze(*file, *yaraPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -194,25 +201,28 @@ func cmdDFIR(args []string) {
 func cmdASM(args []string) {
 	fs := flag.NewFlagSet("asm", flag.ExitOnError)
 	domain := fs.String("domain", "", "apex domain")
+	full := fs.Bool("full-ports", false, "scan 1-65535 (slow)")
 	out := fs.String("out", "", "output JSON report")
 	_ = fs.Parse(args)
 	if *domain == "" {
 		fmt.Fprintln(os.Stderr, "asm: -domain required")
-		os.Exit(1)
+		os.Exit(2)
 	}
-	emit(asm.Map(context.Background(), *domain), *out)
+	emit(asm.Map(context.Background(), *domain, *full), *out)
 }
 
 func cmdWSA(args []string) {
 	fs := flag.NewFlagSet("wsa", flag.ExitOnError)
-	url := fs.String("url", "", "target URL")
+	target := fs.String("url", "", "target URL")
+	inject := fs.Bool("inject", false, "run injection probes")
+	takeover := fs.Bool("takeover", false, "subdomain takeover check")
 	out := fs.String("out", "", "output JSON report")
 	_ = fs.Parse(args)
-	if *url == "" {
+	if *target == "" {
 		fmt.Fprintln(os.Stderr, "wsa: -url required")
-		os.Exit(1)
+		os.Exit(2)
 	}
-	emit(wsa.Audit(context.Background(), *url), *out)
+	emit(wsa.Audit(context.Background(), *target, wsa.Options{Inject: *inject, Takeover: *takeover}), *out)
 }
 
 func cmdPCAP(args []string) {
@@ -222,7 +232,7 @@ func cmdPCAP(args []string) {
 	_ = fs.Parse(args)
 	if *file == "" {
 		fmt.Fprintln(os.Stderr, "pcap: -file required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	r, err := pcap.Analyze(*file)
 	if err != nil {
@@ -234,8 +244,8 @@ func cmdPCAP(args []string) {
 
 func cmdCryptan(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "cryptan: subcommand {id|crack|jwt|encrypt|decrypt|freq}")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "cryptan: {id|crack|jwt|encrypt|decrypt|freq}")
+		os.Exit(2)
 	}
 	sub := args[0]
 	fs := flag.NewFlagSet("cryptan-"+sub, flag.ExitOnError)
@@ -244,6 +254,10 @@ func cmdCryptan(args []string) {
 		h := fs.String("hash", "", "hash to identify")
 		out := fs.String("out", "", "output")
 		_ = fs.Parse(args[1:])
+		if *h == "" {
+			fmt.Fprintln(os.Stderr, "cryptan id: -hash required")
+			os.Exit(2)
+		}
 		algo, speed := cryptan.IdentifyHash(*h)
 		r := core.NewResult("cryptan-id", *h)
 		r.AddExtra("algo", algo)
@@ -254,6 +268,10 @@ func cmdCryptan(args []string) {
 		wl := fs.String("wordlist", "/usr/share/wordlists/rockyou.txt", "wordlist")
 		out := fs.String("out", "", "output")
 		_ = fs.Parse(args[1:])
+		if *h == "" {
+			fmt.Fprintln(os.Stderr, "cryptan crack: -hash required")
+			os.Exit(2)
+		}
 		emit(cryptan.Crack(*h, *wl), *out)
 	case "jwt":
 		tok := fs.String("token", "", "JWT")
@@ -265,6 +283,10 @@ func cmdCryptan(args []string) {
 		in := fs.String("in", "", "input file")
 		outFile := fs.String("out", "", "output file")
 		_ = fs.Parse(args[1:])
+		if *key == "" || *in == "" || *outFile == "" {
+			fmt.Fprintln(os.Stderr, "cryptan: -key, -in, -out required")
+			os.Exit(2)
+		}
 		if err := cryptan.AESCrypt(sub == "encrypt", *key, *in, *outFile); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -278,6 +300,9 @@ func cmdCryptan(args []string) {
 			text = string(b)
 		}
 		emit(cryptan.FreqAnalysis(text), "")
+	default:
+		fmt.Fprintf(os.Stderr, "cryptan: unknown subcommand %q\n", sub)
+		os.Exit(2)
 	}
 }
 
@@ -296,15 +321,15 @@ func cmdPhish(args []string) {
 	_ = fs.Parse(args)
 	if *u == "" {
 		fmt.Fprintln(os.Stderr, "phish: -url required")
-		os.Exit(1)
+		os.Exit(2)
 	}
 	emit(phish.Analyze(context.Background(), *u), *out)
 }
 
 func cmdVulnIntel(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "vulnintel: subcommand {cve|packages}")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "vulnintel: {cve|packages}")
+		os.Exit(2)
 	}
 	sub := args[0]
 	fs := flag.NewFlagSet("vulnintel-"+sub, flag.ExitOnError)
@@ -313,10 +338,17 @@ func cmdVulnIntel(args []string) {
 		id := fs.String("id", "", "CVE ID like CVE-2024-3094")
 		out := fs.String("out", "", "output")
 		_ = fs.Parse(args[1:])
+		if *id == "" {
+			fmt.Fprintln(os.Stderr, "vulnintel cve: -id required")
+			os.Exit(2)
+		}
 		emit(vulnintel.LookupCVE(context.Background(), *id), *out)
 	case "packages":
 		out := fs.String("out", "", "output")
 		_ = fs.Parse(args[1:])
 		emit(vulnintel.ScanPackages(context.Background()), *out)
+	default:
+		fmt.Fprintf(os.Stderr, "vulnintel: unknown subcommand %q\n", sub)
+		os.Exit(2)
 	}
 }

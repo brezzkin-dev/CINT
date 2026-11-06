@@ -243,7 +243,7 @@ func Analyze(ctx context.Context, raw string) *core.Result {
 	if len(chain) > 1 {
 		r.AddExtra("redirect_count", len(chain)-1)
 		r.Add(core.Finding{Tool: "phish", Severity: core.SevMed,
-			Title: fmt.Sprintf("URL redirects through %d hops", len(chain)-1),
+			Title:  fmt.Sprintf("URL redirects through %d hops", len(chain)-1),
 			Detail: strings.Join(chain, " → ")})
 	}
 	if finalBody != "" {

@@ -92,7 +92,7 @@ func Audit(ctx context.Context, target string, opts Options) *core.Result {
 		if _, ok := lcHeaders[strings.ToLower(name)]; !ok {
 			r.Add(core.Finding{
 				Tool: "wsa", Severity: cfg.Sev,
-				Title: "Missing header: " + name,
+				Title:  "Missing header: " + name,
 				Detail: cfg.Msg,
 			})
 		}
@@ -102,7 +102,7 @@ func Audit(ctx context.Context, target string, opts Options) *core.Result {
 		if strings.Contains(csp, "unsafe-inline") || strings.Contains(csp, "unsafe-eval") {
 			r.Add(core.Finding{
 				Tool: "wsa", Severity: core.SevMed,
-				Title: "Weak CSP",
+				Title:  "Weak CSP",
 				Detail: "contains 'unsafe-inline' or 'unsafe-eval'",
 			})
 		}
@@ -164,7 +164,7 @@ func Audit(ctx context.Context, target string, opts Options) *core.Result {
 		if st == 200 {
 			r.Add(core.Finding{
 				Tool: "wsa", Severity: core.SevHigh,
-				Title: "Sensitive path reachable: " + p,
+				Title:  "Sensitive path reachable: " + p,
 				Detail: full,
 			})
 		}

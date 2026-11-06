@@ -144,8 +144,8 @@ func auditSysctl(r *core.Result) {
 		}
 		if strings.TrimSpace(string(b)) != c.Want {
 			r.Add(core.Finding{Tool: "sysaudit", Severity: c.Sev,
-				Title: "sysctl: " + filepath.Base(c.Path),
-				Detail: c.Desc,
+				Title:    "sysctl: " + filepath.Base(c.Path),
+				Detail:   c.Desc,
 				Evidence: map[string]any{"got": strings.TrimSpace(string(b)), "want": c.Want}})
 		}
 	}

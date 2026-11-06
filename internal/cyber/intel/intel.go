@@ -131,15 +131,15 @@ func Enrich(ctx context.Context, iocs []string) *core.Result {
 		if e.Score >= 60 {
 			r.Add(core.Finding{
 				Tool: "intel", Severity: core.SevCrit,
-				Title:  "Malicious IOC: " + e.IOC,
-				Detail: strings.Join(e.Reasons, ", "),
+				Title:    "Malicious IOC: " + e.IOC,
+				Detail:   strings.Join(e.Reasons, ", "),
 				Evidence: map[string]any{"kind": e.Kind, "score": e.Score},
 			})
 		} else if e.Score >= 40 {
 			r.Add(core.Finding{
 				Tool: "intel", Severity: core.SevHigh,
-				Title:  "Suspect IOC: " + e.IOC,
-				Detail: strings.Join(e.Reasons, ", "),
+				Title:    "Suspect IOC: " + e.IOC,
+				Detail:   strings.Join(e.Reasons, ", "),
 				Evidence: map[string]any{"kind": e.Kind, "score": e.Score},
 			})
 		}

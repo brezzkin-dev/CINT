@@ -112,8 +112,8 @@ func analyzePE(path string, r *core.Result, yaraPath string) error {
 		secs = append(secs, Section{Name: s.Name, Size: uint64(len(raw)), Entropy: ent})
 		if len(raw) > 512 && ent > 7.2 {
 			r.Add(core.Finding{Tool: "malscope", Severity: core.SevHigh,
-				Title: "Packed section: " + s.Name,
-				Detail: fmt.Sprintf("entropy %.3f > 7.2", ent),
+				Title:    "Packed section: " + s.Name,
+				Detail:   fmt.Sprintf("entropy %.3f > 7.2", ent),
 				Evidence: map[string]any{"entropy": ent, "size": len(raw)}})
 		}
 	}
