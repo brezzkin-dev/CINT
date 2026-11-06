@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
-	"github.com/ollie/phantomfs/internal/universe/tools/t03_domaintrace"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
+	"github.com/brezzkin-dev/CINT/internal/universe/tools/t03_domaintrace"
 )
 
 const maxHops = 10

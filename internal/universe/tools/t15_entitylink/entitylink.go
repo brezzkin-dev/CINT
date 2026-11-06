@@ -4,18 +4,24 @@ import (
 	"net"
 	"strings"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
-	"github.com/ollie/phantomfs/internal/universe/tools/t03_domaintrace"
-	"github.com/ollie/phantomfs/internal/universe/tools/t04_ipintel"
-	"github.com/ollie/phantomfs/internal/universe/tools/t05_userfinder"
-	"github.com/ollie/phantomfs/internal/universe/tools/t06_mailtrace"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
+	"github.com/brezzkin-dev/CINT/internal/universe/tools/t03_domaintrace"
+	"github.com/brezzkin-dev/CINT/internal/universe/tools/t04_ipintel"
+	"github.com/brezzkin-dev/CINT/internal/universe/tools/t05_userfinder"
+	"github.com/brezzkin-dev/CINT/internal/universe/tools/t06_mailtrace"
 )
 
+// Run cross-correlates an entity: email → domain → IPs → ASN, plus
+// local-part → username → platform presence. Output is a linked graph.
 func Run(target string) (*core.Result, error) {
 	r := core.NewResult("entitylink", target)
 	target = strings.TrimSpace(target)
+
 	entities := map[string]string{}
-	var domains, ips, users, emails []string
+	var domains []string
+	var ips []string
+	var users []string
+	var emails []string
 
 	kind := core.Classify(target)
 	switch kind {
@@ -41,6 +47,12 @@ func Run(target string) (*core.Result, error) {
 		}
 		domains = append(domains, host)
 		entities[host] = "domain"
+		if resolved, _ := net.LookupHost(host); len(resolved) > 0 {
+			for _, ip := range resolved {
+				entities[ip] = "ip"
+				ips = append(ips, ip)
+			}
+		}
 	case core.IOCIPv4, core.IOCIPv6:
 		ips = append(ips, target)
 		entities[target] = "ip"
@@ -50,37 +62,47 @@ func Run(target string) (*core.Result, error) {
 	}
 
 	for _, d := range domains {
-		if resolved, err := net.LookupHost(d); err == nil {
-			for _, ip := range resolved {
-				entities[ip] = "ip"
-				ips = append(ips, ip)
+		dt, err := t03_domaintrace.Run(d)
+		if err == nil {
+			r.AddExtra("domaintrace:"+d, dt.Extra)
+			for _, f := range dt.Findings {
+				f.Tool = "entitylink"
+				r.Findings = append(r.Findings, f)
 			}
 		}
-		if dt, err := t03_domaintrace.Run(d); err == nil {
-			r.AddExtra("domaintrace:"+d, dt.Extra)
-			r.Findings = append(r.Findings, dt.Findings...)
-		}
 	}
-	seen := map[string]bool{}
+
+	seenIP := map[string]bool{}
 	for _, ip := range ips {
-		if seen[ip] {
+		if seenIP[ip] {
 			continue
 		}
-		seen[ip] = true
-		if ipr, err := t04_ipintel.Run(ip); err == nil {
+		seenIP[ip] = true
+		ipr, err := t04_ipintel.Run(ip)
+		if err == nil {
 			r.AddExtra("ipintel:"+ip, ipr.Extra)
-			r.Findings = append(r.Findings, ipr.Findings...)
+			for _, f := range ipr.Findings {
+				f.Tool = "entitylink"
+				r.Findings = append(r.Findings, f)
+			}
 		}
 	}
+
 	for _, em := range emails {
-		if mr, err := t06_mailtrace.Run(em); err == nil {
+		mr, err := t06_mailtrace.Run(em)
+		if err == nil {
 			r.AddExtra("mailtrace:"+em, mr.Extra)
 		}
 	}
+
 	for _, u := range users {
-		if uf, err := t05_userfinder.Run(u); err == nil {
+		uf, err := t05_userfinder.Run(u)
+		if err == nil {
 			r.AddExtra("userfinder:"+u, uf.Extra)
-			r.Findings = append(r.Findings, uf.Findings...)
+			for _, f := range uf.Findings {
+				f.Tool = "entitylink"
+				r.Findings = append(r.Findings, f)
+			}
 		}
 	}
 
@@ -90,8 +112,12 @@ func Run(target string) (*core.Result, error) {
 	}
 	r.AddExtra("entities", entitiesOut)
 	r.AddExtra("entity_count", len(entities))
-	r.Add(core.Finding{Tool: "entitylink", Severity: core.SevInfo,
-		Title: "Entity graph built", Detail: itoa(len(entities)) + " linked entities"})
+
+	r.Add(core.Finding{
+		Tool: "entitylink", Severity: core.SevInfo,
+		Title:  "Entity graph built",
+		Detail: itoa(len(entities)) + " linked entities",
+	})
 	r.Finish()
 	return r, nil
 }
@@ -102,10 +128,18 @@ func itoa(n int) string {
 	}
 	var buf [20]byte
 	i := len(buf)
+	neg := n < 0
+	if neg {
+		n = -n
+	}
 	for n > 0 {
 		i--
 		buf[i] = byte('0' + n%10)
 		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
 	}
 	return string(buf[i:])
 }
