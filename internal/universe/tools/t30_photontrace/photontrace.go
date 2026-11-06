@@ -1,6 +1,3 @@
-// Package t30_photontrace fetches remote images (SSRF-guarded), runs the
-// phototrace heuristic suite on them, and computes perceptual hashes
-// (aHash, dHash, pHash) for similarity matching across local files.
 package t30_photontrace
 
 import (
@@ -10,19 +7,17 @@ import (
 	"encoding/hex"
 	"fmt"
 	"image"
-	"image/jpeg"
-	"image/png"
-	"io"
+	_ "image/jpeg"
+	_ "image/png"
 	"math"
 	"net"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
-	t07 "github.com/ollie/phantomfs/internal/universe/tools/t07_phototrace"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
+	t07 "github.com/brezzkin-dev/CINT/internal/universe/tools/t07_phototrace"
 )
 
 type Options struct {
@@ -80,12 +75,11 @@ func Run(opts Options) (*core.Result, error) {
 	md5h := md5.Sum(data)
 	r.AddExtra("md5", hex.EncodeToString(md5h[:]))
 
-	// EXIF via phototrace parser
 	if exif := t07.ParseEXIF(data); exif != nil {
 		r.AddExtra("exif", exif)
 		if gps, ok := exif["GPSDecimal"].([]float64); ok && len(gps) == 2 {
 			r.Add(core.Finding{Tool: "photontrace", Severity: core.SevMed,
-				Title: "GPS embedded in image",
+				Title:  "GPS embedded in image",
 				Detail: fmt.Sprintf("%.6f,%.6f", gps[0], gps[1])})
 		}
 		if sw, ok := exif["Software"].(string); ok && sw != "" {
@@ -94,20 +88,21 @@ func Run(opts Options) (*core.Result, error) {
 		}
 	}
 
-	// Heuristic suite from phototrace
-	if ela, err := t07.ELA(source, img); err == nil && ela != nil {
-		r.AddExtra("ela", ela)
-		if ela.AnomalousRatio > 0.15 {
-			r.Add(core.Finding{Tool: "photontrace", Severity: core.SevHigh,
-				Title: "ELA anomaly",
-				Detail: fmt.Sprintf("%.1f%% pixels (heuristic)", ela.AnomalousRatio*100)})
+	if opts.File != "" || source != "" {
+		if ela, err := t07.ELA(source, img); err == nil && ela != nil {
+			r.AddExtra("ela", ela)
+			if ela.AnomalousRatio > 0.15 {
+				r.Add(core.Finding{Tool: "photontrace", Severity: core.SevHigh,
+					Title:  "ELA anomaly",
+					Detail: fmt.Sprintf("%.1f%% pixels (heuristic)", ela.AnomalousRatio*100)})
+			}
 		}
 	}
 	if noise := t07.NoiseVariance(img); noise != nil {
 		r.AddExtra("noise", noise)
 		if noise.HeterogeneityScore > 0.5 {
 			r.Add(core.Finding{Tool: "photontrace", Severity: core.SevHigh,
-				Title: "Noise variance heterogeneous",
+				Title:  "Noise variance heterogeneous",
 				Detail: fmt.Sprintf("score %.2f (heuristic)", noise.HeterogeneityScore)})
 		}
 	}
@@ -115,12 +110,11 @@ func Run(opts Options) (*core.Result, error) {
 		r.AddExtra("chroma", chroma)
 		if chroma.ChannelDiscrepancy > 0.4 {
 			r.Add(core.Finding{Tool: "photontrace", Severity: core.SevMed,
-				Title: "Chromatic aberration inconsistent",
+				Title:  "Chromatic aberration inconsistent",
 				Detail: fmt.Sprintf("%.2f", chroma.ChannelDiscrepancy)})
 		}
 	}
 
-	// Perceptual hashes
 	ah := aHash(img)
 	dh := dHash(img)
 	ph := pHash(img)
@@ -128,7 +122,6 @@ func Run(opts Options) (*core.Result, error) {
 	r.AddExtra("dhash", dh)
 	r.AddExtra("phash", ph)
 
-	// Compare if requested
 	if opts.Compare != "" {
 		other, err := os.ReadFile(opts.Compare)
 		if err != nil {
@@ -136,9 +129,9 @@ func Run(opts Options) (*core.Result, error) {
 				Title: "compare file error", Detail: err.Error()})
 		} else if otherImg, _, err := image.Decode(bytes.NewReader(other)); err == nil {
 			r.AddExtra("compare", map[string]any{
-				"ahash_distance": hammingHex(ah, aHash(otherImg)),
-				"dhash_distance": hammingHex(dh, dHash(otherImg)),
-				"phash_distance": hammingHex(ph, pHash(otherImg)),
+				"ahash_distance":       hammingHex(ah, aHash(otherImg)),
+				"dhash_distance":       hammingHex(dh, dHash(otherImg)),
+				"phash_distance":       hammingHex(ph, pHash(otherImg)),
 				"ahash_similarity_pct": hashSimPct(ah, aHash(otherImg)),
 				"dhash_similarity_pct": hashSimPct(dh, dHash(otherImg)),
 				"phash_similarity_pct": hashSimPct(ph, pHash(otherImg)),
@@ -150,7 +143,6 @@ func Run(opts Options) (*core.Result, error) {
 	return r, nil
 }
 
-// aHash: 8x8 grayscale, mean, bits = pixel > mean.
 func aHash(img image.Image) string {
 	g := gray8x8(img)
 	var sum float64
@@ -167,7 +159,6 @@ func aHash(img image.Image) string {
 	return fmt.Sprintf("%016x", bits)
 }
 
-// dHash: 9x8 grayscale, bits = left > right.
 func dHash(img image.Image) string {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -189,7 +180,6 @@ func dHash(img image.Image) string {
 	return fmt.Sprintf("%016x", bits)
 }
 
-// pHash: 32x32 grayscale → DCT → top-left 8x8 → compare to median.
 func pHash(img image.Image) string {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -202,9 +192,7 @@ func pHash(img image.Image) string {
 			gray[y][x] = lum(img.At(sx, sy))
 		}
 	}
-	// 2D DCT (row then column)
 	var dct [N][N]float64
-	// rows
 	for y := 0; y < N; y++ {
 		for u := 0; u < N; u++ {
 			var s float64
@@ -224,7 +212,6 @@ func pHash(img image.Image) string {
 			dct2[v][x] = s
 		}
 	}
-	// Top-left 8x8 (exclude DC at [0][0] for median calc)
 	var vals []float64
 	for y := 0; y < 8; y++ {
 		for x := 0; x < 8; x++ {
@@ -234,7 +221,6 @@ func pHash(img image.Image) string {
 			vals = append(vals, dct2[y][x])
 		}
 	}
-	// median
 	sorted := make([]float64, len(vals))
 	copy(sorted, vals)
 	for i := 1; i < len(sorted); i++ {
@@ -273,13 +259,11 @@ func gray8x8(img image.Image) []float64 {
 	return out
 }
 
-func lum(c any) float64 {
-	type rgba interface{ RGBA() (uint32, uint32, uint32, uint32) }
-	if rc, ok := c.(rgba); ok {
-		r, g, b, _ := rc.RGBA()
-		return 0.299*float64(r>>8) + 0.587*float64(g>>8) + 0.114*float64(b>>8)
-	}
-	return 0
+func lum(c interface {
+	RGBA() (uint32, uint32, uint32, uint32)
+}) float64 {
+	r, g, b, _ := c.RGBA()
+	return 0.299*float64(r>>8) + 0.587*float64(g>>8) + 0.114*float64(b>>8)
 }
 
 func hammingHex(a, b string) int {
@@ -362,8 +346,4 @@ func firstNonEmpty(ss ...string) string {
 	return ""
 }
 
-var _ = io.EOF
-var _ = jpeg.DefaultQuality
-var _ = png.Encoder{}
-var _ = filepath.Separator
 var _ = strings.TrimSpace

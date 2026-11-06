@@ -1,12 +1,7 @@
-// Package t31_forensix walks a home directory for forensic artifacts:
-// shell history, browser profile files (with URL extraction from raw
-// SQLite bytes), startup items, recent files by mtime, and package
-// install logs. Builds a chronological event timeline.
 package t31_forensix
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 type Options struct {
@@ -32,11 +27,11 @@ type Event struct {
 }
 
 type Artifact struct {
-	Kind     string `json:"kind"`
-	Path     string `json:"path"`
-	Size     int64  `json:"size"`
-	MTime    string `json:"mtime"`
-	Detail   string `json:"detail,omitempty"`
+	Kind   string `json:"kind"`
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	MTime  string `json:"mtime"`
+	Detail string `json:"detail,omitempty"`
 }
 
 var reURL = regexp.MustCompile(`https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{6,}`)
@@ -62,7 +57,6 @@ func Run(opts Options) (*core.Result, error) {
 	var events []Event
 	var artifacts []Artifact
 
-	// 1. Shell history
 	for _, name := range []string{".bash_history", ".zsh_history", ".sh_history", ".python_history", ".mysql_history"} {
 		p := filepath.Join(root, name)
 		if info, err := os.Stat(p); err == nil {
@@ -74,7 +68,6 @@ func Run(opts Options) (*core.Result, error) {
 		}
 	}
 
-	// 2. Browser artifacts
 	browserPatterns := map[string][]string{
 		"firefox": {
 			".mozilla/firefox/*/places.sqlite",
@@ -126,7 +119,6 @@ func Run(opts Options) (*core.Result, error) {
 		}
 	}
 
-	// 3. Startup items
 	for _, pat := range []string{
 		"*/systemd/user/*.service",
 		"*/.config/systemd/user/*.service",
@@ -150,7 +142,6 @@ func Run(opts Options) (*core.Result, error) {
 		}
 	}
 
-	// 4. System-wide startup (needs read access)
 	for _, pat := range []string{
 		"/etc/systemd/system/*.service",
 		"/etc/init.d/*",
@@ -168,7 +159,6 @@ func Run(opts Options) (*core.Result, error) {
 		}
 	}
 
-	// 5. Recent files (last N days)
 	cutoff := time.Now().AddDate(0, 0, -opts.RecentDays)
 	filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
@@ -184,7 +174,6 @@ func Run(opts Options) (*core.Result, error) {
 		return nil
 	})
 
-	// 6. Package log
 	if info, err := os.Stat("/var/log/dpkg.log"); err == nil {
 		artifacts = append(artifacts, Artifact{
 			Kind: "dpkg_log", Path: "/var/log/dpkg.log", Size: info.Size(),
@@ -193,7 +182,6 @@ func Run(opts Options) (*core.Result, error) {
 		scanDpkgLog("/var/log/dpkg.log", &events)
 	}
 
-	// Sort events
 	sort.Slice(events, func(i, j int) bool { return events[i].TS.Before(events[j].TS) })
 	for i := range events {
 		events[i].TSStr = events[i].TS.UTC().Format(time.RFC3339)
@@ -206,7 +194,6 @@ func Run(opts Options) (*core.Result, error) {
 	r.AddExtra("artifact_count", len(artifacts))
 	r.AddExtra("event_count", len(events))
 
-	// Summary findings
 	counts := map[string]int{}
 	for _, a := range artifacts {
 		counts[a.Kind]++
@@ -232,17 +219,15 @@ func scanHistoryFile(p string, r *core.Result, events *[]Event) {
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 4096), 1<<20)
-	count := 0
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		count++
 		if reSuspicious.MatchString(line) {
 			r.Add(core.Finding{Tool: "forensix", Severity: core.SevHigh,
-				Title: "Suspicious shell command",
-				Detail: line,
+				Title:    "Suspicious shell command",
+				Detail:   line,
 				Evidence: map[string]any{"file": p}})
 		}
 		for _, u := range reURL.FindAllString(line, 5) {
@@ -251,7 +236,6 @@ func scanHistoryFile(p string, r *core.Result, events *[]Event) {
 			})
 		}
 	}
-	_ = count
 }
 
 func scanStartupFile(p string) string {
@@ -300,7 +284,6 @@ func scanDpkgLog(p string, events *[]Event) {
 	count := 0
 	for sc.Scan() && count < 500 {
 		line := sc.Text()
-		// Format: 2024-01-01 12:34:56 install foo:amd64 <none> 1.0
 		if len(line) < 20 {
 			continue
 		}
@@ -322,5 +305,3 @@ func minInt(a, b int) int {
 	}
 	return b
 }
-
-var _ = json.Marshal

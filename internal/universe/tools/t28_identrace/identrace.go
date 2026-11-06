@@ -1,7 +1,3 @@
-// Package t28_identrace enriches a username across public profile APIs
-// that return real JSON data: GitHub, Reddit, Hacker News, Keybase,
-// Mastodon. Gravatar hashed via MD5. Every response is the actual
-// platform payload — this is not a status-code guess.
 package t28_identrace
 
 import (
@@ -15,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 type Profile struct {
@@ -72,7 +68,6 @@ func Run(username, email string) (*core.Result, error) {
 
 	wg.Wait()
 
-	// Emit findings for confirmed profiles
 	found := 0
 	for _, p := range profiles {
 		if p.Found {
@@ -122,13 +117,13 @@ func lookupGitHub(ctx context.Context, user string) Profile {
 	}
 	p.Found = true
 	p.Data = map[string]any{
-		"name":        data["name"],
-		"bio":         data["bio"],
-		"company":     data["company"],
-		"location":    data["location"],
+		"name":         data["name"],
+		"bio":          data["bio"],
+		"company":      data["company"],
+		"location":     data["location"],
 		"public_repos": data["public_repos"],
-		"followers":   data["followers"],
-		"created_at":  data["created_at"],
+		"followers":    data["followers"],
+		"created_at":   data["created_at"],
 	}
 	return p
 }
@@ -137,7 +132,7 @@ func lookupReddit(ctx context.Context, user string) Profile {
 	u := "https://www.reddit.com/user/" + url.PathEscape(user) + "/about.json"
 	p := Profile{Platform: "reddit", URL: "https://www.reddit.com/user/" + user}
 	status, _, body, err := core.HTTPGet(ctx, u,
-		map[string]string{"User-Agent": "Universe-OSINT/1.0"})
+		map[string]string{"User-Agent": "CINT-OSINT/1.0"})
 	if err != nil {
 		p.Error = err.Error()
 		return p
@@ -167,7 +162,7 @@ func lookupReddit(ctx context.Context, user string) Profile {
 	}
 	p.Found = true
 	p.Data = map[string]any{
-		"name": out.Data.Name,
+		"name":          out.Data.Name,
 		"comment_karma": out.Data.CommentKarma,
 		"link_karma":    out.Data.LinkKarma,
 		"is_mod":        out.Data.IsMod,
@@ -194,10 +189,10 @@ func lookupHackerNews(ctx context.Context, user string) Profile {
 	}
 	p.Found = true
 	p.Data = map[string]any{
-		"id":         data["id"],
-		"karma":      data["karma"],
-		"created":    data["created"],
-		"about":      data["about"],
+		"id":      data["id"],
+		"karma":   data["karma"],
+		"created": data["created"],
+		"about":   data["about"],
 	}
 	return p
 }

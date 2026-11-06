@@ -1,19 +1,14 @@
-// Package t27_domainx does deep DNS enumeration: all record types,
-// apex vs www comparison, reverse-MX lookup, DNSSEC chain detection,
-// and CAA policy. Uses stdlib net for common types and raw DNS wire
-// protocol (dns.go) for SOA/CAA/DNSKEY/DS/NAPTR.
 package t27_domainx
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
 	"sync"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 func Run(domain string) (*core.Result, error) {
@@ -23,7 +18,6 @@ func Run(domain string) (*core.Result, error) {
 
 	resolver := pickResolver()
 
-	// Records that stdlib net handles well
 	if ips, err := net.LookupHost(domain); err == nil {
 		var v4, v6 []string
 		for _, ip := range ips {
@@ -78,7 +72,6 @@ func Run(domain string) (*core.Result, error) {
 		}
 	}
 
-	// Raw DNS for SOA, CAA, DNSKEY, DS
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -144,14 +137,12 @@ func Run(domain string) (*core.Result, error) {
 	}()
 	wg.Wait()
 
-	// Apex vs www
 	if www := "www." + domain; www != domain {
 		if ips, err := net.LookupHost(www); err == nil {
 			r.AddExtra("www_ips", ips)
 		}
 	}
 
-	// Findings
 	emitFindings(r)
 	r.Finish()
 	return r, nil
@@ -176,7 +167,7 @@ func emitFindings(r *core.Result) {
 			Title: "DNSSEC not signed", Detail: "no DNSKEY at apex"})
 	} else if _, hasDS := r.Extra["ds"]; !hasDS {
 		r.Add(core.Finding{Tool: "domainx", Severity: core.SevLow,
-			Title: "DNSSEC key present but no DS at parent",
+			Title:  "DNSSEC key present but no DS at parent",
 			Detail: "chain-of-trust incomplete"})
 	}
 	if _, ok := r.Extra["caa"]; !ok {
@@ -215,12 +206,10 @@ func reverseMX(ctx context.Context, mxs []*net.MX, r *core.Result) {
 }
 
 func pickResolver() string {
-	// Prefer Cloudflare, fallback to Google.
 	if _, err := net.DialTimeout("udp", "1.1.1.1:53", 2*time.Second); err == nil {
 		return "1.1.1.1:53"
 	}
 	return "8.8.8.8:53"
 }
 
-var _ = json.Marshal
 var _ = fmt.Sprintf

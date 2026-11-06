@@ -1,22 +1,11 @@
-// Package t29_mailscope parses raw RFC 5322 email headers, reconstructs
-// the Received chain, verifies DKIM body-hash + signature presence,
-// checks SPF/DMARC DNS records, and flags header mismatches.
-//
-// Real techniques: RFC 5322 header unfolding, DKIM-Signature tag parsing
-// (RFC 6376), simple/relaxed body canonicalization, SHA-256 body hash
-// compare, RSA public-key fetch + signature presence check, and DNS
-// record validation.
 package t29_mailscope
 
 import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/base64"
-	"encoding/pem"
 	"fmt"
 	"net"
 	"os"
@@ -25,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 type Options struct {
@@ -33,44 +22,44 @@ type Options struct {
 }
 
 type Mail struct {
-	From      string            `json:"from"`
-	To        string            `json:"to"`
-	ReplyTo   string            `json:"reply_to,omitempty"`
-	ReturnPath string           `json:"return_path,omitempty"`
-	Subject   string            `json:"subject"`
-	Date      string            `json:"date"`
-	MessageID string            `json:"message_id,omitempty"`
-	OriginatingIP string        `json:"originating_ip,omitempty"`
-	Received  []map[string]any  `json:"received,omitempty"`
-	AuthResults string          `json:"auth_results,omitempty"`
-	DKIM      []DKIMResult      `json:"dkim,omitempty"`
-	SPF       *SPFResult        `json:"spf,omitempty"`
-	DMARC     *DMARCResult      `json:"dmarc,omitempty"`
-	AllHeaders map[string][]string `json:"all_headers,omitempty"`
+	From          string              `json:"from"`
+	To            string              `json:"to"`
+	ReplyTo       string              `json:"reply_to,omitempty"`
+	ReturnPath    string              `json:"return_path,omitempty"`
+	Subject       string              `json:"subject"`
+	Date          string              `json:"date"`
+	MessageID     string              `json:"message_id,omitempty"`
+	OriginatingIP string              `json:"originating_ip,omitempty"`
+	Received      []map[string]any    `json:"received,omitempty"`
+	AuthResults   string              `json:"auth_results,omitempty"`
+	DKIM          []DKIMResult        `json:"dkim,omitempty"`
+	SPF           *SPFResult          `json:"spf,omitempty"`
+	DMARC         *DMARCResult        `json:"dmarc,omitempty"`
+	AllHeaders    map[string][]string `json:"all_headers,omitempty"`
 }
 
 type DKIMResult struct {
-	Domain    string `json:"domain"`
-	Selector  string `json:"selector"`
-	Algorithm string `json:"algorithm"`
-	Canon     string `json:"canon,omitempty"`
-	BodyHashPresent bool `json:"body_hash_present"`
-	BodyHashValid   bool `json:"body_hash_valid"`
-	PubkeyPresent   bool `json:"pubkey_present"`
-	SignaturePresent bool `json:"signature_present"`
-	Error     string `json:"error,omitempty"`
+	Domain           string `json:"domain"`
+	Selector         string `json:"selector"`
+	Algorithm        string `json:"algorithm"`
+	Canon            string `json:"canon,omitempty"`
+	BodyHashPresent  bool   `json:"body_hash_present"`
+	BodyHashValid    bool   `json:"body_hash_valid"`
+	PubkeyPresent    bool   `json:"pubkey_present"`
+	SignaturePresent bool   `json:"signature_present"`
+	Error            string `json:"error,omitempty"`
 }
 
 type SPFResult struct {
-	Record string `json:"record,omitempty"`
-	All    string `json:"all,omitempty"`
-	Present bool  `json:"present"`
+	Record  string `json:"record,omitempty"`
+	All     string `json:"all,omitempty"`
+	Present bool   `json:"present"`
 }
 
 type DMARCResult struct {
-	Record string `json:"record,omitempty"`
-	Policy string `json:"policy,omitempty"`
-	Present bool  `json:"present"`
+	Record  string `json:"record,omitempty"`
+	Policy  string `json:"policy,omitempty"`
+	Present bool   `json:"present"`
 }
 
 var reReceivedFrom = regexp.MustCompile(`(?i)from\s+(\S+)`)
@@ -194,7 +183,6 @@ func parseReceived(headers []string) []map[string]any {
 		if m := reReceivedWith.FindStringSubmatch(h); len(m) > 1 {
 			entry["with"] = m[1]
 		}
-		// Extract timestamp if present (after last semicolon)
 		if semi := strings.LastIndex(h, ";"); semi >= 0 {
 			ts := strings.TrimSpace(h[semi+1:])
 			entry["timestamp"] = ts
@@ -266,7 +254,6 @@ func verifyDKIM(r *core.Result, m *Mail, body []byte) error {
 				for _, txt := range txts {
 					if strings.Contains(txt, "p=") {
 						dk.PubkeyPresent = true
-						verifyDKIMSignature(&dk, sig, tags, m, canonicalBody, txt)
 						break
 					}
 				}
@@ -275,92 +262,6 @@ func verifyDKIM(r *core.Result, m *Mail, body []byte) error {
 		m.DKIM = append(m.DKIM, dk)
 	}
 	return nil
-}
-
-func verifyDKIMSignature(dk *DKIMResult, sigHeader string, tags map[string]string, m *Mail, body []byte, pubkeyTXT string) {
-	// Extract base64 public key
-	var pkB64 string
-	for _, part := range strings.Split(pubkeyTXT, ";") {
-		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "p=") {
-			pkB64 = strings.TrimPrefix(part, "p=")
-			break
-		}
-	}
-	if pkB64 == "" {
-		dk.Error = "public key empty"
-		return
-	}
-	pkBytes, err := base64.StdEncoding.DecodeString(pkB64)
-	if err != nil {
-		dk.Error = "pubkey base64: " + err.Error()
-		return
-	}
-	// Two formats: raw PKCS#1 or SubjectPublicKeyInfo
-	var rsaPub *rsa.PublicKey
-	if k, err := x509.ParsePKIXPublicKey(pkBytes); err == nil {
-		if rp, ok := k.(*rsa.PublicKey); ok {
-			rsaPub = rp
-		}
-	}
-	if rsaPub == nil {
-		// Try as DER PKCS#1
-		if k, err := x509.ParsePKCS1PublicKey(pkBytes); err == nil {
-			rsaPub = k
-		}
-	}
-	if rsaPub == nil {
-		// Try PEM wrapped
-		block, _ := pem.Decode(pkBytes)
-		if block != nil {
-			if k, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
-				if rp, ok := k.(*rsa.PublicKey); ok {
-					rsaPub = rp
-				}
-			}
-		}
-	}
-	if rsaPub == nil {
-		dk.Error = "could not parse pubkey"
-		return
-	}
-
-	// Reconstruct signed header list
-	h := tags["h"]
-	if h == "" {
-		dk.Error = "no h= tag"
-		return
-	}
-	headerNames := strings.Split(h, ":")
-	var buf bytes.Buffer
-	for _, name := range headerNames {
-		name = strings.TrimSpace(name)
-		vals, ok := m.AllHeaders[canonicalHeader(name)]
-		if !ok || len(vals) == 0 {
-			continue
-		}
-		key := canonicalHeader(name)
-		buf.WriteString(canonicalizeHeaderRelaxed(key, vals[0]))
-	}
-	// Add the DKIM-Signature itself (without b= value)
-	stripped := stripDKIMSignature(sigHeader)
-	buf.WriteString(canonicalizeHeaderRelaxed("Dkim-Signature", stripped))
-
-	// Hash + verify
-	signed := sha256.Sum256(buf.Bytes())
-	sigBytes, err := base64.StdEncoding.DecodeString(tags["b"])
-	if err != nil {
-		dk.Error = "signature base64: " + err.Error()
-		return
-	}
-	if err := rsa.VerifyPKCS1v15(rsaPub, 0 /* unused with SHA256 hash bytes pre-hashed */, signed[:], sigBytes); err != nil {
-		// Fall through — the sig may still verify
-		_ = err
-	}
-	// Note: full RSA verify requires crypto.SHA256 with hash function
-	// here. We report the presence and body-hash validity above; full
-	// header signature verification is fragile across canonicalization
-	// edge cases and is out of scope for this pass.
 }
 
 func parseDKIMTags(sig string) map[string]string {
@@ -378,30 +279,7 @@ func parseDKIMTags(sig string) map[string]string {
 	return tags
 }
 
-func stripDKIMSignature(sig string) string {
-	// Remove the b= value (may contain spaces)
-	parts := strings.Split(sig, ";")
-	var out []string
-	for _, p := range parts {
-		t := strings.TrimSpace(p)
-		if strings.HasPrefix(t, "b=") {
-			out = append(out, "b=")
-			continue
-		}
-		out = append(out, p)
-	}
-	return strings.Join(out, ";")
-}
-
-func canonicalizeHeaderRelaxed(key, val string) string {
-	// Lowercase key, collapse whitespace in value, trim, append CRLF
-	val = strings.Join(strings.Fields(val), " ")
-	return strings.ToLower(key) + ":" + val + "\r\n"
-}
-
 func canonicalizeBodySimple(body []byte) []byte {
-	// Simple canonicalization: preserve as-is, ensure ends with CRLF,
-	// strip trailing empty lines down to one CRLF.
 	s := strings.ReplaceAll(string(body), "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
 	s = strings.TrimRight(s, "\n") + "\r\n"
@@ -416,7 +294,6 @@ func verifySPFDMARC(r *core.Result, m *Mail) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// SPF
 	spf := &SPFResult{}
 	if txts, err := net.DefaultResolver.LookupTXT(ctx, domain); err == nil {
 		for _, t := range txts {
@@ -440,7 +317,6 @@ func verifySPFDMARC(r *core.Result, m *Mail) error {
 	}
 	m.SPF = spf
 
-	// DMARC
 	dmarc := &DMARCResult{}
 	if txts, err := net.DefaultResolver.LookupTXT(ctx, "_dmarc."+domain); err == nil {
 		for _, t := range txts {
@@ -463,7 +339,6 @@ func verifySPFDMARC(r *core.Result, m *Mail) error {
 }
 
 func extractDomain(from string) string {
-	// Support "Name <user@domain>" and "user@domain"
 	if lt := strings.LastIndex(from, "<"); lt >= 0 {
 		from = from[lt+1:]
 	}
@@ -481,14 +356,14 @@ func emitFindings(r *core.Result, m *Mail) {
 
 	if fromDomain != "" && returnDomain != "" && fromDomain != returnDomain {
 		r.Add(core.Finding{Tool: "mailscope", Severity: core.SevHigh,
-			Title: "From / Return-Path domain mismatch",
+			Title:  "From / Return-Path domain mismatch",
 			Detail: fromDomain + " vs " + returnDomain})
 	}
 	if m.ReplyTo != "" {
 		replyDomain := extractDomain(m.ReplyTo)
 		if fromDomain != replyDomain && replyDomain != "" {
 			r.Add(core.Finding{Tool: "mailscope", Severity: core.SevMed,
-				Title: "Reply-To differs from From",
+				Title:  "Reply-To differs from From",
 				Detail: m.ReplyTo + " vs " + m.From})
 		}
 	}
@@ -511,7 +386,7 @@ func emitFindings(r *core.Result, m *Mail) {
 	for _, dk := range m.DKIM {
 		if dk.BodyHashPresent && !dk.BodyHashValid {
 			r.Add(core.Finding{Tool: "mailscope", Severity: core.SevHigh,
-				Title: "DKIM body hash MISMATCH",
+				Title:  "DKIM body hash MISMATCH",
 				Detail: "message body tampered after signing"})
 		}
 		if dk.PubkeyPresent && dk.BodyHashValid {
