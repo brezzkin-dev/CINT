@@ -1,13 +1,15 @@
 package dup
 
 import (
-	"context"
 	"sort"
 
-	"github.com/ollie/phantomfs/internal/core"
-	"github.com/ollie/phantomfs/internal/hash"
+	"github.com/brezzkin-dev/CINT/internal/core"
+	"github.com/brezzkin-dev/CINT/internal/hash"
 )
 
+// Find groups same-size candidates, hashes them in parallel (xxh64), then
+// returns groups with 2+ paths sharing an identical hash. Pure algorithmic
+// dedupe — no content trust.
 func Find(entries []core.FileEntry) []core.DupGroup {
 	buckets := map[int64][]core.FileEntry{}
 	for _, e := range entries {
@@ -25,7 +27,7 @@ func Find(entries []core.FileEntry) []core.DupGroup {
 	if len(candidates) == 0 {
 		return nil
 	}
-	hashes := hash.HashParallel(context.Background(), candidates)
+	hashes := hash.HashParallel(simpleContext(), candidates)
 	byHash := map[uint64][]core.FileEntry{}
 	for _, e := range candidates {
 		h, ok := hashes[e.Path]
@@ -63,6 +65,8 @@ func formatHash(h uint64) string {
 	return string(buf[:])
 }
 
+// ReclaimedBytes returns total bytes freed if every duplicate were reduced
+// to a single copy per group.
 func ReclaimedBytes(groups []core.DupGroup) int64 {
 	var total int64
 	for _, g := range groups {

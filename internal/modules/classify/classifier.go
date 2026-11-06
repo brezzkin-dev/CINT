@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ollie/phantomfs/internal/core"
-	"github.com/ollie/phantomfs/internal/magic"
+	"github.com/brezzkin-dev/CINT/internal/core"
+	"github.com/brezzkin-dev/CINT/internal/magic"
 )
 
 type Rule struct {

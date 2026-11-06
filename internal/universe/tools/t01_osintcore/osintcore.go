@@ -1,55 +1,89 @@
 package t01_osintcore
 
 import (
+	"fmt"
+	"net"
 	"strings"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
-	"github.com/ollie/phantomfs/internal/universe/tools/t03_domaintrace"
-	"github.com/ollie/phantomfs/internal/universe/tools/t04_ipintel"
-	"github.com/ollie/phantomfs/internal/universe/tools/t05_userfinder"
-	"github.com/ollie/phantomfs/internal/universe/tools/t06_mailtrace"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
+	"github.com/brezzkin-dev/CINT/internal/universe/tools/t03_domaintrace"
+	"github.com/brezzkin-dev/CINT/internal/universe/tools/t04_ipintel"
+	"github.com/brezzkin-dev/CINT/internal/universe/tools/t05_userfinder"
+	"github.com/brezzkin-dev/CINT/internal/universe/tools/t06_mailtrace"
 )
 
+// Run routes a target to the appropriate sub-tool by IOC type and merges
+// findings into a single report.
 func Run(target string) (*core.Result, error) {
 	r := core.NewResult("osintcore", target)
+	target = strings.TrimSpace(target)
+
 	kind := core.Classify(target)
-	r.AddExtra("classified_as", string(kind))
+	r.AddExtra("target_kind", string(kind))
 
 	switch kind {
 	case core.IOCIPv4, core.IOCIPv6:
 		sub, err := t04_ipintel.Run(target)
 		if err == nil {
-			r.Findings = append(r.Findings, sub.Findings...)
-			r.AddExtra("ipintel", sub.Extra)
+			merge(r, sub, "ipintel")
 		}
 	case core.IOCDomain, core.IOCURL:
 		host := target
 		if kind == core.IOCURL {
-			if i := strings.Index(host, "://"); i >= 0 {
-				host = host[i+3:]
-			}
-			if i := strings.IndexAny(host, "/:?#"); i >= 0 {
-				host = host[:i]
+			if u := parseHost(target); u != "" {
+				host = u
 			}
 		}
 		sub, err := t03_domaintrace.Run(host)
 		if err == nil {
-			r.Findings = append(r.Findings, sub.Findings...)
-			r.AddExtra("domaintrace", sub.Extra)
+			merge(r, sub, "domaintrace")
+		}
+		if net.ParseIP(host) == nil {
+			if ips, err := net.LookupHost(host); err == nil && len(ips) > 0 {
+				ipr, err := t04_ipintel.Run(ips[0])
+				if err == nil {
+					merge(r, ipr, "ipintel")
+				}
+			}
 		}
 	case core.IOCEmail:
 		sub, err := t06_mailtrace.Run(target)
 		if err == nil {
-			r.Findings = append(r.Findings, sub.Findings...)
-			r.AddExtra("mailtrace", sub.Extra)
+			merge(r, sub, "mailtrace")
 		}
 	default:
 		sub, err := t05_userfinder.Run(target)
 		if err == nil {
-			r.Findings = append(r.Findings, sub.Findings...)
-			r.AddExtra("userfinder", sub.Extra)
+			merge(r, sub, "userfinder")
 		}
 	}
+
+	r.Add(core.Finding{
+		Tool: "osintcore", Severity: core.SevInfo,
+		Title:  "OSINT complete",
+		Detail: fmt.Sprintf("%d sub-findings", len(r.Findings)),
+	})
 	r.Finish()
 	return r, nil
+}
+
+func merge(dst, src *core.Result, source string) {
+	for _, f := range src.Findings {
+		f.Tool = dst.Tool + "/" + source
+		dst.Findings = append(dst.Findings, f)
+	}
+	if src.Extra != nil {
+		dst.AddExtra(source, src.Extra)
+	}
+}
+
+func parseHost(raw string) string {
+	s := raw
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.IndexAny(s, "/:?#"); i >= 0 {
+		s = s[:i]
+	}
+	return s
 }

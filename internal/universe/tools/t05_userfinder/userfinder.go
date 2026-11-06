@@ -7,9 +7,11 @@ import (
 	"sync"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
+// Status is a truthful classification. Only StatusConfirmed indicates a
+// most-likely-existing account. Everything else is explicitly labeled.
 type Status string
 
 const (

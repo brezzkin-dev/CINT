@@ -4,10 +4,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ollie/phantomfs/internal/core"
-	"github.com/ollie/phantomfs/internal/scan"
+	"github.com/brezzkin-dev/CINT/internal/core"
+	"github.com/brezzkin-dev/CINT/internal/scan"
 )
 
+// Reconstruct re-creates missing parent directories for every path in the
+// tree. This does not recover file content — for that see carve.
 func Reconstruct(root string) (int, error) {
 	entries, err := scan.Walk(scan.Options{Root: root})
 	if err != nil {
