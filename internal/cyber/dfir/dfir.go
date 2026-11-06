@@ -1,5 +1,3 @@
-// Package dfir — Digital Forensics Investigation.
-// Parses shell history, auth.log, cron, and Linux wtmp records.
 package dfir
 
 import (
@@ -14,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brezzkin-dev/CINT/internal/cyber/core"
+	core "github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 type Event struct {
@@ -25,7 +23,13 @@ type Event struct {
 	Info string    `json:"info"`
 }
 
-var reAuth = regexp.MustCompile(`^(\w{3}\s+\d+\s+\d+:\d+:\d+)\s+\S+\s+sshd\[\d+\]:\s+(\S+)\s+(.+)$`)
+var (
+	reAuth   = regexp.MustCompile(`^(\w{3}\s+\d+\s+\d+:\d+:\d+)\s+\S+\s+sshd\[\d+\]:\s+(\S+)\s+(.+)$`)
+	reIP     = regexp.MustCompile(`\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b`)
+	reURL    = regexp.MustCompile(`https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{4,}`)
+	reDomain = regexp.MustCompile(`\b([a-z0-9-]+\.)+[a-z]{2,}\b`)
+	reHash   = regexp.MustCompile(`\b[a-fA-F0-9]{32,64}\b`)
+)
 
 func parseAuthLog(path string, r *core.Result, events *[]Event) {
 	f, err := os.Open(path)
@@ -48,22 +52,18 @@ func parseAuthLog(path string, r *core.Result, events *[]Event) {
 		kind := "auth"
 		sev := core.SevInfo
 		if strings.Contains(m[3], "Failed password") {
-			kind = "auth-fail"
-			sev = core.SevMed
+			kind, sev = "auth-fail", core.SevMed
 		} else if strings.Contains(m[3], "Accepted") {
 			kind = "auth-ok"
 		} else if strings.Contains(m[3], "Invalid user") {
-			kind = "auth-invalid"
-			sev = core.SevHigh
+			kind, sev = "auth-invalid", core.SevHigh
 		}
 		*events = append(*events, Event{TS: ts, Kind: kind, Src: m[2], Info: m[3]})
 		if sev.Rank() >= core.SevHigh.Rank() {
-			r.Add(core.Finding{
-				Tool: "dfir", Severity: sev,
+			r.Add(core.Finding{Tool: "dfir", Severity: sev,
 				Title:    "Suspicious auth event",
 				Detail:   line,
-				Evidence: map[string]any{"ts": ts.Format(time.RFC3339)},
-			})
+				Evidence: map[string]any{"ts": ts.Format(time.RFC3339)}})
 		}
 	}
 }
@@ -74,7 +74,7 @@ func parseHistory(home string, r *core.Result, events *[]Event) {
 		"wget": "download", "curl": "download", "ssh": "remote",
 		"nc ": "netcat", "ncat": "netcat", "chmod +x": "chmod",
 		"base64 -d": "decode", "python -c": "inline", "perl -e": "inline",
-		"rm -rf": "destructive",
+		"rm -rf": "destructive", "scp ": "upload",
 	}
 	for _, name := range names {
 		p := filepath.Join(home, name)
@@ -90,12 +90,22 @@ func parseHistory(home string, r *core.Result, events *[]Event) {
 			}
 			for pat, kind := range patterns {
 				if strings.Contains(line, pat) {
-					*events = append(*events, Event{
-						TS: time.Now().UTC(), Kind: "cmd-" + kind,
-						User: filepath.Base(home), Info: line,
-					})
+					*events = append(*events, Event{TS: time.Now().UTC(),
+						Kind: "cmd-" + kind, User: filepath.Base(home), Info: line})
 					break
 				}
+			}
+			for _, ip := range reIP.FindAllString(line, -1) {
+				r.Add(core.Finding{Tool: "dfir", Severity: core.SevLow,
+					Title:    "IOC ip in history",
+					Detail:   ip,
+					Evidence: map[string]any{"source": p}})
+			}
+			for _, u := range reURL.FindAllString(line, -1) {
+				r.Add(core.Finding{Tool: "dfir", Severity: core.SevMed,
+					Title:    "IOC url in history",
+					Detail:   u,
+					Evidence: map[string]any{"source": p}})
 			}
 		}
 		f.Close()
@@ -104,10 +114,11 @@ func parseHistory(home string, r *core.Result, events *[]Event) {
 
 func parseCron(r *core.Result, events *[]Event) {
 	paths := []string{"/etc/crontab"}
-	for _, d := range []string{"/etc/cron.d", "/etc/cron.hourly", "/etc/cron.daily", "/etc/cron.weekly", "/etc/cron.monthly"} {
-		entries, _ := os.ReadDir(d)
-		for _, e := range entries {
-			paths = append(paths, filepath.Join(d, e.Name()))
+	for _, d := range []string{"/etc/cron.d", "/var/spool/cron/crontabs"} {
+		if entries, err := os.ReadDir(d); err == nil {
+			for _, e := range entries {
+				paths = append(paths, filepath.Join(d, e.Name()))
+			}
 		}
 	}
 	for _, p := range paths {
@@ -121,16 +132,12 @@ func parseCron(r *core.Result, events *[]Event) {
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
 			}
-			*events = append(*events, Event{
-				TS: time.Now().UTC(), Kind: "cron",
-				Info: p + ": " + line,
-			})
-			if strings.Contains(line, "wget") || strings.Contains(line, "curl") || strings.Contains(line, "base64") {
-				r.Add(core.Finding{
-					Tool: "dfir", Severity: core.SevHigh,
-					Title:  "Suspicious cron entry",
-					Detail: p + ": " + line,
-				})
+			*events = append(*events, Event{TS: time.Now().UTC(), Kind: "cron",
+				Info: p + ": " + line})
+			if strings.Contains(line, "wget") || strings.Contains(line, "curl") ||
+				strings.Contains(line, "base64") {
+				r.Add(core.Finding{Tool: "dfir", Severity: core.SevHigh,
+					Title: "Suspicious cron entry", Detail: p + ": " + line})
 			}
 		}
 		f.Close()
@@ -165,10 +172,8 @@ func parseWtmp(path string, r *core.Result, events *[]Event) {
 		case 8:
 			kind = "logout"
 		}
-		*events = append(*events, Event{
-			TS: time.Unix(int64(ts), 0).UTC(), Kind: kind,
-			User: user, Src: host, Info: "tty=" + line,
-		})
+		*events = append(*events, Event{TS: time.Unix(int64(ts), 0).UTC(),
+			Kind: kind, User: user, Src: host, Info: "tty=" + line})
 	}
 }
 
@@ -197,13 +202,11 @@ func Investigate(root string) (*core.Result, error) {
 			parseHistory(hp, r, &events)
 		}
 	}
-
 	for _, logPath := range []string{"/var/log/auth.log", "/var/log/secure"} {
 		if _, err := os.Stat(logPath); err == nil {
 			parseAuthLog(logPath, r, &events)
 		}
 	}
-
 	parseCron(r, &events)
 	parseWtmp("/var/log/wtmp", r, &events)
 
@@ -213,3 +216,6 @@ func Investigate(root string) (*core.Result, error) {
 	r.Finish()
 	return r, nil
 }
+
+var _ = reDomain
+var _ = reHash

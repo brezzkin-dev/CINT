@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/brezzkin-dev/CINT/internal/cyber/core"
+	core "github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 type yaraRule struct {
@@ -16,34 +16,52 @@ type yaraRule struct {
 
 var builtinRules = []yaraRule{
 	{Name: "Mimikatz_Legacy", Strings: [][]byte{
-		[]byte("sekurlsa::logonpasswords"), []byte("gentilkiwi"), []byte("dpapi::masterkey"),
+		[]byte("sekurlsa::logonpasswords"),
+		[]byte("gentilkiwi"),
+		[]byte("dpapi::masterkey"),
 	}, Condition: "any of them"},
 	{Name: "Cobalt_Strike_Beacon", Strings: [][]byte{
-		[]byte("beacon.dll"), []byte("cobaltstrike"),
+		[]byte("beacon.dll"),
+		[]byte("cobaltstrike"),
 	}, Condition: "any of them"},
 	{Name: "Emotet_Loader", Strings: [][]byte{
-		[]byte("Emotet"), []byte("LoadLibraryA"), []byte("VirtualAlloc"),
+		[]byte("Emotet"),
+		[]byte("LoadLibraryA"),
+		[]byte("VirtualAlloc"),
 	}, Condition: "all of them"},
 	{Name: "Ransomware_Note", Strings: [][]byte{
-		[]byte("YOUR FILES ARE ENCRYPTED"), []byte("bitcoin"), []byte("decrypt"),
+		[]byte("YOUR FILES ARE ENCRYPTED"),
+		[]byte("bitcoin"),
+		[]byte("decrypt"),
 	}, Condition: "any of them"},
 	{Name: "Meterpreter", Strings: [][]byte{
-		[]byte("metsrv"), []byte("stdapi"), []byte("ReflectiveLoader"),
+		[]byte("metsrv"),
+		[]byte("stdapi"),
+		[]byte("ReflectiveLoader"),
 	}, Condition: "any of them"},
 	{Name: "UPX_Packed", Strings: [][]byte{
-		[]byte("UPX0"), []byte("UPX1"), []byte("UPX!"),
+		[]byte("UPX0"),
+		[]byte("UPX1"),
+		[]byte("UPX!"),
 	}, Condition: "all of them"},
 	{Name: "Crypto_Clue", Strings: [][]byte{
-		[]byte("CryptEncrypt"), []byte("CryptDecrypt"), []byte("CryptGenKey"),
+		[]byte("CryptEncrypt"),
+		[]byte("CryptDecrypt"),
+		[]byte("CryptGenKey"),
 	}, Condition: "any of them"},
 	{Name: "Keylogger_Clue", Strings: [][]byte{
-		[]byte("SetWindowsHookEx"), []byte("WH_KEYBOARD"), []byte("GetForegroundWindow"),
+		[]byte("SetWindowsHookEx"),
+		[]byte("WH_KEYBOARD"),
+		[]byte("GetForegroundWindow"),
 	}, Condition: "all of them"},
 	{Name: "ReverseShell_Clue", Strings: [][]byte{
-		[]byte("WSAStartup"), []byte("connect"), []byte("cmd.exe"),
+		[]byte("WSAStartup"),
+		[]byte("connect"),
+		[]byte("cmd.exe"),
 	}, Condition: "all of them"},
 	{Name: "Persistence_Clue", Strings: [][]byte{
-		[]byte("CurrentVersion\\Run"), []byte("RegSetValueEx"),
+		[]byte("CurrentVersion\\Run"),
+		[]byte("RegSetValueEx"),
 	}, Condition: "all of them"},
 }
 
@@ -53,6 +71,7 @@ func loadCustomRules(path string) ([]yaraRule, error) {
 		return nil, err
 	}
 	defer f.Close()
+
 	var rules []yaraRule
 	sc := bufio.NewScanner(f)
 	var cur *yaraRule
@@ -76,7 +95,8 @@ func loadCustomRules(path string) ([]yaraRule, error) {
 			continue
 		}
 		if strings.HasPrefix(line, "condition:") {
-			cur.Condition = strings.TrimSpace(strings.TrimPrefix(line, "condition:"))
+			cond := strings.TrimSpace(strings.TrimPrefix(line, "condition:"))
+			cur.Condition = cond
 			inStrings = false
 			continue
 		}
@@ -97,9 +117,10 @@ func loadCustomRules(path string) ([]yaraRule, error) {
 			if strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"") {
 				cur.Strings = append(cur.Strings, []byte(val[1:len(val)-1]))
 			} else if strings.HasPrefix(val, "{") && strings.HasSuffix(val, "}") {
-				hexs := strings.Fields(strings.TrimSpace(val[1 : len(val)-1]))
-				buf := make([]byte, 0, len(hexs))
-				for _, h := range hexs {
+				hexs := strings.TrimSpace(val[1 : len(val)-1])
+				raw := strings.Fields(hexs)
+				buf := make([]byte, 0, len(raw))
+				for _, h := range raw {
 					if len(h) == 2 {
 						buf = append(buf, hexByte(h))
 					}
@@ -137,30 +158,38 @@ func runYara(r *core.Result, data []byte, customPath string) {
 			rules = append(rules, extra...)
 		}
 	}
+
 	var matches []string
 	for _, rule := range rules {
 		matched := 0
 		for _, pat := range rule.Strings {
-			if len(pat) > 0 && containsBytes(data, pat) {
+			if len(pat) == 0 {
+				continue
+			}
+			if containsBytes(data, pat) {
 				matched++
 			}
 		}
-		fire := matched > 0
-		if rule.Condition == "all of them" {
+		fire := false
+		switch rule.Condition {
+		case "all of them":
 			fire = matched == len(rule.Strings)
+		default:
+			fire = matched > 0
 		}
 		if fire {
 			matches = append(matches, rule.Name)
 			sev := core.SevHigh
-			for _, n := range []string{"Mimikatz", "Cobalt", "Meterpreter", "Ransomware"} {
-				if strings.Contains(rule.Name, n) {
-					sev = core.SevCrit
-					break
-				}
+			if strings.Contains(rule.Name, "Mimikatz") ||
+				strings.Contains(rule.Name, "Cobalt") ||
+				strings.Contains(rule.Name, "Meterpreter") ||
+				strings.Contains(rule.Name, "Ransomware") {
+				sev = core.SevCrit
 			}
 			r.Add(core.Finding{
 				Tool: "malscope", Severity: sev,
-				Title: "YARA match: " + rule.Name, Detail: rule.Condition,
+				Title:    "YARA match: " + rule.Name,
+				Detail:   rule.Condition,
 				Evidence: map[string]any{"matched_strings": matched, "total": len(rule.Strings)},
 			})
 		}

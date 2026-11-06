@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/brezzkin-dev/CINT/internal/cyber/core"
+	core "github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 const (
@@ -21,6 +21,7 @@ type nvdResponse struct {
 	Vulnerabilities []struct {
 		CVE struct {
 			ID           string `json:"id"`
+			Published    string `json:"published"`
 			Descriptions []struct {
 				Lang  string `json:"lang"`
 				Value string `json:"value"`
@@ -70,7 +71,8 @@ func LookupCVE(ctx context.Context, cveID string) *core.Result {
 	status, _, body, err := core.HTTPGet(ctx, fmt.Sprintf(nvdURL, cveID), nil)
 	if err != nil || status != 200 {
 		r.Add(core.Finding{Tool: "vulnintel", Severity: core.SevHigh,
-			Title: "NVD lookup failed", Detail: fmt.Sprintf("status=%d err=%v", status, err)})
+			Title:  "NVD lookup failed",
+			Detail: fmt.Sprintf("status=%d err=%v", status, err)})
 		r.Finish()
 		return r
 	}
@@ -81,6 +83,7 @@ func LookupCVE(ctx context.Context, cveID string) *core.Result {
 		return r
 	}
 	cve := nvd.Vulnerabilities[0].CVE
+
 	desc := ""
 	for _, d := range cve.Descriptions {
 		if d.Lang == "en" {
@@ -89,6 +92,7 @@ func LookupCVE(ctx context.Context, cveID string) *core.Result {
 		}
 	}
 	r.AddExtra("description", desc)
+
 	var score float64
 	for _, groups := range cve.Metrics {
 		for _, m := range groups {
@@ -98,11 +102,13 @@ func LookupCVE(ctx context.Context, cveID string) *core.Result {
 		}
 	}
 	r.AddExtra("cvss_score", score)
+
 	var refs []string
 	for _, ref := range cve.References {
 		refs = append(refs, ref.URL)
 	}
 	r.AddExtra("references", refs)
+
 	if st2, _, b2, _ := core.HTTPGet(ctx, fmt.Sprintf(epssURL, cveID), nil); st2 == 200 {
 		var ep struct {
 			Data []struct {
@@ -115,41 +121,20 @@ func LookupCVE(ctx context.Context, cveID string) *core.Result {
 			r.AddExtra("epss_percentile", ep.Data[0].Perc)
 		}
 	}
+
 	if loadKEV(ctx)[cveID] {
 		r.AddExtra("in_cisa_kev", true)
-		r.Add(core.Finding{Tool: "vulnintel", Severity: core.SevCrit, Title: "In CISA KEV catalog", Detail: desc})
+		r.Add(core.Finding{Tool: "vulnintel", Severity: core.SevCrit,
+			Title: "In CISA KEV catalog", Detail: desc})
 	} else if score >= 9.0 {
-		r.Add(core.Finding{Tool: "vulnintel", Severity: core.SevCrit, Title: fmt.Sprintf("CVSS %.1f critical", score), Detail: desc})
+		r.Add(core.Finding{Tool: "vulnintel", Severity: core.SevCrit,
+			Title:  fmt.Sprintf("CVSS %.1f critical", score),
+			Detail: desc})
 	} else if score >= 7.0 {
-		r.Add(core.Finding{Tool: "vulnintel", Severity: core.SevHigh, Title: fmt.Sprintf("CVSS %.1f high", score), Detail: desc})
+		r.Add(core.Finding{Tool: "vulnintel", Severity: core.SevHigh,
+			Title:  fmt.Sprintf("CVSS %.1f high", score),
+			Detail: desc})
 	}
-	r.Finish()
-	return r
-}
-
-func Batch(ctx context.Context, ids []string) *core.Result {
-	r := core.NewResult("vulnintel-batch", "")
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 4)
-	var mu sync.Mutex
-	var allFindings []core.Finding
-	var extras []map[string]any
-	for _, id := range ids {
-		wg.Add(1)
-		go func(id string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			sub := LookupCVE(ctx, id)
-			mu.Lock()
-			allFindings = append(allFindings, sub.Findings...)
-			extras = append(extras, map[string]any{"cve": id, "findings": len(sub.Findings)})
-			mu.Unlock()
-		}(id)
-	}
-	wg.Wait()
-	r.Findings = allFindings
-	r.AddExtra("batches", extras)
 	r.Finish()
 	return r
 }
@@ -164,7 +149,8 @@ func ScanPackages(ctx context.Context) *core.Result {
 		out = scanAPK()
 	}
 	if out == "" {
-		r.Add(core.Finding{Tool: "vulnintel", Severity: core.SevHigh, Title: "no supported package manager found"})
+		r.Add(core.Finding{Tool: "vulnintel", Severity: core.SevHigh,
+			Title: "no supported package manager found"})
 		r.Finish()
 		return r
 	}
@@ -182,6 +168,7 @@ func scanDpkg() string {
 	}
 	return string(out)
 }
+
 func scanRPM() string {
 	out, err := exec.Command("rpm", "-qa", "--qf", "%{NAME} %{VERSION}-%{RELEASE}\n").Output()
 	if err != nil {
@@ -189,6 +176,7 @@ func scanRPM() string {
 	}
 	return string(out)
 }
+
 func scanAPK() string {
 	out, err := exec.Command("apk", "info", "-v").Output()
 	if err != nil {

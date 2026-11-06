@@ -1,32 +1,43 @@
 package malscope
 
 import (
+	"bufio"
 	"debug/elf"
 	"debug/pe"
-	"fmt"
+	"encoding/binary"
 	"hash/fnv"
 	"math"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
-	"github.com/brezzkin-dev/CINT/internal/cyber/core"
+	core "github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 var reStr = regexp.MustCompile(`[\x20-\x7e]{4,}`)
 
 var suspiciousAPIs = map[string]core.Severity{
-	"VirtualAllocEx": core.SevHigh, "WriteProcessMemory": core.SevHigh,
-	"CreateRemoteThread": core.SevCrit, "NtCreateThreadEx": core.SevHigh,
-	"SetWindowsHookEx": core.SevMed, "GetAsyncKeyState": core.SevHigh,
-	"URLDownloadToFileA": core.SevHigh, "URLDownloadToFileW": core.SevHigh,
-	"InternetOpenUrlA": core.SevHigh, "WinExec": core.SevHigh,
-	"ShellExecuteA": core.SevMed, "ShellExecuteW": core.SevMed,
-	"CryptEncrypt": core.SevMed, "CryptDecrypt": core.SevMed,
-	"AdjustTokenPrivileges": core.SevHigh, "OpenProcessToken": core.SevMed,
-	"IsDebuggerPresent": core.SevLow, "CheckRemoteDebuggerPresent": core.SevLow,
-	"NtQueryInformationProcess": core.SevMed, "GetTickCount": core.SevLow,
+	"VirtualAllocEx":             core.SevHigh,
+	"WriteProcessMemory":         core.SevHigh,
+	"CreateRemoteThread":         core.SevCrit,
+	"NtCreateThreadEx":           core.SevHigh,
+	"SetWindowsHookEx":           core.SevMed,
+	"GetAsyncKeyState":           core.SevHigh,
+	"URLDownloadToFileA":         core.SevHigh,
+	"URLDownloadToFileW":         core.SevHigh,
+	"InternetOpenUrlA":           core.SevHigh,
+	"WinExec":                    core.SevHigh,
+	"ShellExecuteA":              core.SevMed,
+	"ShellExecuteW":              core.SevMed,
+	"CryptEncrypt":               core.SevMed,
+	"CryptDecrypt":               core.SevMed,
+	"AdjustTokenPrivileges":      core.SevHigh,
+	"OpenProcessToken":           core.SevMed,
+	"IsDebuggerPresent":          core.SevLow,
+	"CheckRemoteDebuggerPresent": core.SevLow,
+	"NtQueryInformationProcess":  core.SevMed,
 }
 
 type Section struct {
@@ -61,15 +72,11 @@ func roundTo(f float64, p int) float64 {
 }
 
 func imphash(funcs []string) string {
-	lower := make([]string, len(funcs))
-	for i, f := range funcs {
-		lower[i] = strings.ToLower(f)
+	lower := make([]string, 0, len(funcs))
+	for _, f := range funcs {
+		lower = append(lower, strings.ToLower(f))
 	}
-	for i := 1; i < len(lower); i++ {
-		for j := i; j > 0 && lower[j] < lower[j-1]; j-- {
-			lower[j], lower[j-1] = lower[j-1], lower[j]
-		}
-	}
+	sort.Strings(lower)
 	h := fnv.New64a()
 	for i, f := range lower {
 		if i > 0 {
@@ -77,7 +84,17 @@ func imphash(funcs []string) string {
 		}
 		h.Write([]byte(f))
 	}
-	return fmt.Sprintf("%016x", h.Sum64())
+	return hexUint64(h.Sum64())
+}
+
+func hexUint64(v uint64) string {
+	const hex = "0123456789abcdef"
+	var b [16]byte
+	for i := 15; i >= 0; i-- {
+		b[i] = hex[v&0xf]
+		v >>= 4
+	}
+	return string(b[:])
 }
 
 func detectOverlay(f *pe.File, fileSize int64) int64 {
@@ -100,6 +117,7 @@ func analyzePE(path string, r *core.Result, yaraPath string) error {
 		return err
 	}
 	defer f.Close()
+
 	data, _ := os.ReadFile(path)
 	r.AddExtra("format", "pe")
 	r.AddExtra("arch", archName(f.Machine))
@@ -111,36 +129,45 @@ func analyzePE(path string, r *core.Result, yaraPath string) error {
 		ent := roundTo(entropy(raw), 3)
 		secs = append(secs, Section{Name: s.Name, Size: uint64(len(raw)), Entropy: ent})
 		if len(raw) > 512 && ent > 7.2 {
-			r.Add(core.Finding{Tool: "malscope", Severity: core.SevHigh,
+			r.Add(core.Finding{
+				Tool: "malscope", Severity: core.SevHigh,
 				Title:    "Packed section: " + s.Name,
-				Detail:   fmt.Sprintf("entropy %.3f > 7.2", ent),
-				Evidence: map[string]any{"entropy": ent, "size": len(raw)}})
+				Evidence: map[string]any{"entropy": ent, "size": len(raw)},
+			})
 		}
 	}
 	r.AddExtra("sections", secs)
 
-	if overlay := detectOverlay(f, int64(len(data))); overlay > 0 {
+	overlay := detectOverlay(f, int64(len(data)))
+	if overlay > 0 {
 		sev := core.SevMed
-		if overlay > 1<<20 {
+		if overlay > 1024*1024 {
 			sev = core.SevHigh
 		}
-		r.Add(core.Finding{Tool: "malscope", Severity: sev,
-			Title: "PE overlay detected", Detail: "payload appended after last section",
-			Evidence: map[string]any{"overlay_bytes": overlay}})
+		r.Add(core.Finding{
+			Tool: "malscope", Severity: sev,
+			Title:    "PE overlay detected",
+			Detail:   "payload appended after last section",
+			Evidence: map[string]any{"overlay_bytes": overlay},
+		})
 	}
 
 	if imports, err := f.ImportedSymbols(); err == nil {
-		r.AddExtra("imphash", imphash(imports))
+		hash := imphash(imports)
+		r.AddExtra("imphash", hash)
 		var hits []string
 		for _, imp := range imports {
 			if sev, ok := suspiciousAPIs[imp]; ok {
 				hits = append(hits, imp)
-				r.Add(core.Finding{Tool: "malscope", Severity: sev,
-					Title: "Suspicious import: " + imp, Detail: "win32 API commonly used by malware"})
+				r.Add(core.Finding{
+					Tool: "malscope", Severity: sev,
+					Title: "Suspicious import: " + imp,
+				})
 			}
 		}
 		r.AddExtra("suspicious_imports", hits)
 	}
+
 	addStrings(r, data)
 	runYara(r, data, yaraPath)
 	return nil
@@ -175,28 +202,28 @@ func addStrings(r *core.Result, data []byte) {
 	seen := map[string]bool{}
 	for _, m := range matches {
 		s := string(m)
-		if (strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")) && !seen[s] {
-			seen[s] = true
-			urls = append(urls, s)
-			if len(urls) >= 32 {
-				break
+		if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+			if !seen[s] {
+				seen[s] = true
+				urls = append(urls, s)
+				if len(urls) >= 32 {
+					break
+				}
 			}
 		}
 	}
 	if len(urls) > 0 {
-		n := 5
-		if len(urls) < n {
-			n = len(urls)
-		}
-		r.Add(core.Finding{Tool: "malscope", Severity: core.SevMed,
-			Title: "Embedded URLs", Detail: strings.Join(urls[:n], "; "),
-			Evidence: map[string]any{"urls": urls}})
+		r.Add(core.Finding{
+			Tool: "malscope", Severity: core.SevMed,
+			Title:    "Embedded URLs",
+			Detail:   strings.Join(urls[:minInt(5, len(urls))], "; "),
+			Evidence: map[string]any{"urls": urls},
+		})
 		r.AddExtra("urls", urls)
 	}
 	r.AddExtra("entropy_overall", roundTo(entropy(data), 3))
 }
 
-// Analyze performs static analysis. yaraPath is optional custom YARA-lite rules.
 func Analyze(path, yaraPath string) (*core.Result, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -207,15 +234,12 @@ func Analyze(path, yaraPath string) (*core.Result, error) {
 	f.Close()
 
 	r := core.NewResult("malscope", path)
-	ext := strings.ToLower(filepath.Ext(path))
 	var aerr error
 	switch {
 	case head[0] == 'M' && head[1] == 'Z':
 		aerr = analyzePE(path, r, yaraPath)
 	case head[0] == 0x7f && head[1] == 'E' && head[2] == 'L' && head[3] == 'F':
 		aerr = analyzeELF(path, r, yaraPath)
-	case ext == ".exe" || ext == ".dll":
-		aerr = analyzePE(path, r, yaraPath)
 	default:
 		data, _ := os.ReadFile(path)
 		r.AddExtra("format", "unknown")
@@ -241,3 +265,14 @@ func archName(m uint16) string {
 	}
 	return "unknown"
 }
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+var _ = bufio.NewReader
+var _ = binary.LittleEndian
+var _ = filepath.Separator

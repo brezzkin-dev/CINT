@@ -1,4 +1,3 @@
-// Package sysaudit — System Security Auditing.
 package sysaudit
 
 import (
@@ -8,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/brezzkin-dev/CINT/internal/cyber/core"
+	core "github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 func findSetuid(r *core.Result, root string) {
@@ -19,7 +18,8 @@ func findSetuid(r *core.Result, root string) {
 		m := info.Mode()
 		if m&os.ModeSetuid != 0 {
 			r.Add(core.Finding{Tool: "sysaudit", Severity: core.SevHigh,
-				Title: "SUID binary", Detail: p, Evidence: map[string]any{"mode": m.String()}})
+				Title: "SUID binary", Detail: p,
+				Evidence: map[string]any{"mode": m.String()}})
 		}
 		if m&os.ModeSetgid != 0 {
 			r.Add(core.Finding{Tool: "sysaudit", Severity: core.SevMed,
@@ -86,16 +86,13 @@ func auditSSH(r *core.Result) {
 	}
 	defer f.Close()
 	checks := map[string]struct {
-		Want  string
-		Sev   core.Severity
-		Label string
+		Want string
+		Sev  core.Severity
 	}{
-		"PermitRootLogin":        {"no", core.SevHigh, "root SSH login"},
-		"PasswordAuthentication": {"no", core.SevMed, "password auth (prefer keys)"},
-		"PermitEmptyPasswords":   {"no", core.SevCrit, "empty passwords"},
-		"X11Forwarding":          {"no", core.SevLow, "X11 forwarding"},
-		"MaxAuthTries":           {"3", core.SevLow, "too many auth tries"},
-		"Protocol":               {"2", core.SevLow, "SSH protocol"},
+		"PermitRootLogin":        {"no", core.SevHigh},
+		"PasswordAuthentication": {"no", core.SevMed},
+		"PermitEmptyPasswords":   {"no", core.SevCrit},
+		"X11Forwarding":          {"no", core.SevLow},
 	}
 	found := map[string]string{}
 	sc := bufio.NewScanner(f)
@@ -105,21 +102,15 @@ func auditSSH(r *core.Result) {
 			continue
 		}
 		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
+		if len(fields) >= 2 {
+			found[fields[0]] = fields[1]
 		}
-		found[fields[0]] = fields[1]
 	}
 	for k, cfg := range checks {
 		v, ok := found[k]
-		if !ok {
+		if !ok || v != cfg.Want {
 			r.Add(core.Finding{Tool: "sysaudit", Severity: cfg.Sev,
-				Title: "SSH: " + k + " unset", Detail: "should be " + cfg.Want})
-			continue
-		}
-		if v != cfg.Want {
-			r.Add(core.Finding{Tool: "sysaudit", Severity: cfg.Sev,
-				Title: "SSH: " + k + " = " + v, Detail: cfg.Label})
+				Title: "SSH: " + k + " = " + v, Detail: "should be " + cfg.Want})
 		}
 	}
 }
@@ -129,13 +120,11 @@ func auditSysctl(r *core.Result) {
 		Path string
 		Want string
 		Sev  core.Severity
-		Desc string
 	}{
-		{"/proc/sys/kernel/randomize_va_space", "2", core.SevHigh, "ASLR disabled or partial"},
-		{"/proc/sys/net/ipv4/ip_forward", "0", core.SevMed, "IP forwarding enabled (router mode)"},
-		{"/proc/sys/net/ipv4/conf/all/accept_redirects", "0", core.SevLow, "ICMP redirects accepted"},
-		{"/proc/sys/kernel/dmesg_restrict", "1", core.SevLow, "dmesg readable by all"},
-		{"/proc/sys/kernel/kptr_restrict", "1", core.SevLow, "kernel pointers exposed"},
+		{"/proc/sys/kernel/randomize_va_space", "2", core.SevHigh},
+		{"/proc/sys/net/ipv4/ip_forward", "0", core.SevMed},
+		{"/proc/sys/kernel/dmesg_restrict", "1", core.SevLow},
+		{"/proc/sys/kernel/kptr_restrict", "1", core.SevLow},
 	}
 	for _, c := range checks {
 		b, err := os.ReadFile(c.Path)
@@ -145,45 +134,8 @@ func auditSysctl(r *core.Result) {
 		if strings.TrimSpace(string(b)) != c.Want {
 			r.Add(core.Finding{Tool: "sysaudit", Severity: c.Sev,
 				Title:    "sysctl: " + filepath.Base(c.Path),
-				Detail:   c.Desc,
 				Evidence: map[string]any{"got": strings.TrimSpace(string(b)), "want": c.Want}})
 		}
-	}
-}
-
-func auditPorts(r *core.Result) {
-	for _, p := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
-		f, err := os.Open(p)
-		if err != nil {
-			continue
-		}
-		sc := bufio.NewScanner(f)
-		sc.Scan()
-		for sc.Scan() {
-			fields := strings.Fields(sc.Text())
-			if len(fields) < 4 {
-				continue
-			}
-			state := fields[3]
-			if state != "0A" {
-				continue
-			}
-			parts := strings.Split(fields[1], ":")
-			if len(parts) != 2 {
-				continue
-			}
-			port, _ := strconv.ParseInt(parts[1], 16, 32)
-			local := strings.Split(fields[1], ":")[0]
-			if local == "00000000" || local == "00000000000000000000000000000000" {
-				sev := core.SevMed
-				if port == 3306 || port == 5432 || port == 6379 || port == 27017 {
-					sev = core.SevHigh
-				}
-				r.Add(core.Finding{Tool: "sysaudit", Severity: sev,
-					Title: "Listening on all interfaces: " + strconv.Itoa(int(port))})
-			}
-		}
-		f.Close()
 	}
 }
 
@@ -194,7 +146,10 @@ func Audit(root string) *core.Result {
 	auditShadow(r)
 	auditSSH(r)
 	auditSysctl(r)
-	auditPorts(r)
+	checkContainerDetect(r)
+	auditCapabilities(r)
+	auditSudoers(r)
+	auditCron(r)
 	r.Finish()
 	return r
 }

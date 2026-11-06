@@ -6,17 +6,18 @@ import (
 	"time"
 )
 
-// RateLimiter is a token-bucket limiter used by network-facing tools
-// so they don't get IP-banned by upstream feeds.
+// RateLimiter is a token-bucket limiter so network-facing tools don't get
+// IP-banned by upstream feeds. Wait blocks until a token is available or
+// the context is cancelled.
 type RateLimiter struct {
 	mu       sync.Mutex
 	tokens   float64
 	capacity float64
-	rate     float64 // tokens per second
+	rate     float64
 	last     time.Time
 }
 
-func NewRateLimiter(capacity float64, perSecond float64) *RateLimiter {
+func NewRateLimiter(capacity, perSecond float64) *RateLimiter {
 	return &RateLimiter{
 		tokens:   capacity,
 		capacity: capacity,

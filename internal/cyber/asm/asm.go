@@ -1,4 +1,3 @@
-// Package asm — Attack Surface Mapping.
 package asm
 
 import (
@@ -12,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brezzkin-dev/CINT/internal/cyber/core"
+	core "github.com/brezzkin-dev/CINT/internal/cyber/core"
 )
 
 var topPorts = []int{
@@ -31,6 +30,17 @@ type service struct {
 	Port   int    `json:"port"`
 	Banner string `json:"banner,omitempty"`
 	TLS    bool   `json:"tls,omitempty"`
+	Name   string `json:"name,omitempty"`
+}
+
+var serviceNames = map[int]string{
+	21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns", 80: "http",
+	110: "pop3", 143: "imap", 443: "https", 445: "smb", 993: "imaps",
+	995: "pop3s", 1433: "mssql", 1521: "oracle", 2049: "nfs", 2375: "docker",
+	3306: "mysql", 3389: "rdp", 5432: "postgres", 5900: "vnc",
+	6379: "redis", 8080: "http-alt", 8443: "https-alt",
+	8888: "http-alt", 9000: "http-alt", 9090: "http-alt",
+	9200: "elasticsearch", 11211: "memcached", 27017: "mongodb",
 }
 
 func crtSH(ctx context.Context, domain string) []string {
@@ -83,8 +93,12 @@ func probe(host string, port int, timeout time.Duration) *service {
 	buf := make([]byte, 256)
 	conn.Write([]byte("\r\n"))
 	n, _ := conn.Read(buf)
-	svc := &service{Host: host, Port: port, Banner: strings.TrimSpace(string(buf[:n]))}
-	if port == 443 || port == 8443 {
+	svc := &service{
+		Host: host, Port: port,
+		Banner: strings.TrimSpace(string(buf[:n])),
+		Name:   serviceNames[port],
+	}
+	if port == 443 || port == 8443 || port == 993 || port == 995 {
 		tc := tls.Client(conn, &tls.Config{InsecureSkipVerify: true})
 		if tc.Handshake() == nil {
 			svc.TLS = true
@@ -93,15 +107,11 @@ func probe(host string, port int, timeout time.Duration) *service {
 	return svc
 }
 
-func scanPorts(host string) []*service {
-	return scanPortsWith(host, topPorts)
-}
-
-func scanPortsWith(host string, ports []int) []*service {
+func scanPorts(host string, ports []int, concurrency int) []*service {
 	var out []*service
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, 64)
+	sem := make(chan struct{}, concurrency)
 	for _, p := range ports {
 		wg.Add(1)
 		go func(p int) {
@@ -116,6 +126,15 @@ func scanPortsWith(host string, ports []int) []*service {
 		}(p)
 	}
 	wg.Wait()
+	sort.Slice(out, func(i, j int) bool { return out[i].Port < out[j].Port })
+	return out
+}
+
+func allPorts() []int {
+	out := make([]int, 65535)
+	for i := 1; i <= 65535; i++ {
+		out[i-1] = i
+	}
 	return out
 }
 
@@ -146,26 +165,25 @@ func Map(ctx context.Context, domain string, fullPorts bool) *core.Result {
 	r.AddExtra("subdomains", resolved)
 
 	ports := topPorts
+	concurrency := 64
 	if fullPorts {
-		ports = make([]int, 0, 65535)
-		for i := 1; i <= 65535; i++ {
-			ports = append(ports, i)
-		}
+		ports = allPorts()
+		concurrency = 200
 	}
-	apex := scanPortsWith(domain, ports)
+	apex := scanPorts(domain, ports, concurrency)
 	r.AddExtra("services", apex)
-	r.AddExtra("full_ports", fullPorts)
 
 	for _, svc := range apex {
 		sev := core.SevLow
-		if svc.Port == 3306 || svc.Port == 5432 || svc.Port == 6379 || svc.Port == 27017 || svc.Port == 11211 {
+		switch svc.Port {
+		case 21, 23, 445, 3306, 5432, 6379, 27017, 11211, 2375, 9200:
 			sev = core.SevHigh
-		} else if svc.Port == 21 || svc.Port == 23 || svc.Port == 445 {
-			sev = core.SevHigh
+		case 139, 1433, 1521, 2049, 5900, 3389:
+			sev = core.SevMed
 		}
 		r.Add(core.Finding{
 			Tool: "asm", Severity: sev,
-			Title:    fmt.Sprintf("Open port %d", svc.Port),
+			Title:    fmt.Sprintf("Open port %d (%s)", svc.Port, svc.Name),
 			Detail:   svc.Banner,
 			Evidence: map[string]any{"host": svc.Host, "tls": svc.TLS},
 		})
