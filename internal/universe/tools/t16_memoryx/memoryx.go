@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 type Options struct {
@@ -47,12 +47,14 @@ var (
 
 var keywordIndex = []string{
 	"mimikatz", "sekurlsa", "lsass", "cobaltstrike", "meterpreter",
-	"powershell -enc", "powershell -encodedcommand", "invoke-expression",
-	"downloadstring", "frombase64string", "virtualalloc", "writeprocessmemory",
-	"createremotethread", "ntcreatethreadex", "adjusttokenprivileges",
-	"cmd.exe /c", "certutil -urlcache", "bitsadmin /transfer",
-	"mshta http", "rundll32 javascript", "keylogger", "GetAsyncKeyState",
-	"SetWindowsHookEx", "ransom", "encryptor", "bitcoin", "monero", "onion",
+	"powershell -enc", "invoke-expression", "downloadstring",
+	"frombase64string", "reflection.assembly", "virtualalloc",
+	"writeprocessmemory", "createremotethread", "ntcreatethreadex",
+	"adjusttokenprivileges", "certutil -urlcache", "bitsadmin /transfer",
+	"mshta http", "rundll32 javascript", "wscript.shell",
+	"set-mppreference", "add-mppreference", "amsi",
+	"keylogger", "getasynckeystate", "setwindowshookex",
+	"ransom", "encryptor", "bitcoin", "monero", "onion", "socks5h",
 }
 
 const chunkSize = 1 << 20
@@ -76,16 +78,21 @@ func Run(path string, opts Options) (*core.Result, error) {
 	defer f.Close()
 
 	iocs := IOCSet{
-		URLs: map[string]int{}, IPv4: map[string]int{}, IPv6: map[string]int{},
-		Emails: map[string]int{}, Hashes: map[string]int{}, Keywords: map[string]int{},
+		URLs:     map[string]int{},
+		IPv4:     map[string]int{},
+		IPv6:     map[string]int{},
+		Emails:   map[string]int{},
+		Hashes:   map[string]int{},
+		Keywords: map[string]int{},
 	}
+
 	hasher := sha256.New()
 	br := bufio.NewReaderSize(f, chunkSize)
 	buf := make([]byte, chunkSize)
 	var carry []byte
-	var peaks []EntropyPeak
+	offset := int64(0)
+	peaks := []EntropyPeak{}
 	maxEntropy := 0.0
-	overallOffset := int64(0)
 
 	for {
 		n, rerr := io.ReadFull(br, buf)
@@ -101,11 +108,9 @@ func Run(path string, opts Options) (*core.Result, error) {
 
 		for i := 0; i+4096 <= len(chunk); i += 4096 {
 			e := shannon(chunk[i : i+4096])
-			if e > 7.5 {
-				if e > maxEntropy {
-					maxEntropy = e
-				}
-				peaks = append(peaks, EntropyPeak{Offset: overallOffset + int64(i), Entropy: roundf(e, 3)})
+			if e > 7.5 && e > maxEntropy {
+				maxEntropy = e
+				peaks = append(peaks, EntropyPeak{Offset: offset + int64(i), Entropy: roundf(e, 3)})
 				if len(peaks) > 100 {
 					peaks = peaks[1:]
 				}
@@ -117,14 +122,14 @@ func Run(path string, opts Options) (*core.Result, error) {
 		for i := 0; i+64 <= len(chunk); i++ {
 			if chunk[i] == 'M' && chunk[i+1] == 'Z' {
 				peOff := int(chunk[i+0x3C]) | int(chunk[i+0x3D])<<8 | int(chunk[i+0x3E])<<16 | int(chunk[i+0x3F])<<24
-				if peOff > 0 && i+peOff+4 <= len(chunk) && chunk[i+peOff] == 'P' && chunk[i+peOff+1] == 'E' {
+				if i+peOff+2 <= len(chunk) && chunk[i+peOff] == 'P' && chunk[i+peOff+1] == 'E' {
 					iocs.PEHits++
 				}
 			}
 		}
 
 		if len(iocs.Base64) < 20 {
-			for _, m := range reBase64.FindAll(combined, -1) {
+			for _, m := range reBase64.FindAll(combined, 20) {
 				if len(iocs.Base64) >= 20 {
 					break
 				}
@@ -137,18 +142,18 @@ func Run(path string, opts Options) (*core.Result, error) {
 						}
 					}
 					if float64(printable)/float64(len(decoded)) > 0.7 {
-						iocs.Base64 = append(iocs.Base64, string(m[:min(80, len(m))]))
+						iocs.Base64 = append(iocs.Base64, string(m))
 					}
 				}
 			}
 		}
 
 		if len(combined) > overlap {
-			carry = append([]byte{}, combined[len(combined)-overlap:]...)
+			carry = combined[len(combined)-overlap:]
 		} else {
-			carry = append([]byte{}, combined...)
+			carry = combined
 		}
-		overallOffset += int64(n)
+		offset += int64(n)
 		if rerr != nil {
 			break
 		}
@@ -159,23 +164,29 @@ func Run(path string, opts Options) (*core.Result, error) {
 	r.AddExtra("sha256", hex.EncodeToString(hasher.Sum(nil)))
 
 	for u, n := range iocs.URLs {
-		r.Add(core.Finding{Tool: "memoryx", Severity: core.SevInfo, Title: "URL", Detail: u, Evidence: map[string]any{"count": n}})
+		r.Add(core.Finding{Tool: "memoryx", Severity: core.SevInfo,
+			Title: "URL", Detail: u, Evidence: map[string]any{"count": n}})
 	}
 	for kw, n := range iocs.Keywords {
 		sev := core.SevMed
-		low := strings.ToLower(kw)
-		if strings.Contains(low, "mimikatz") || strings.Contains(low, "cobaltstrike") ||
-			strings.Contains(low, "meterpreter") || strings.Contains(low, "ransom") {
+		if strings.Contains(kw, "mimikatz") || strings.Contains(kw, "cobaltstrike") ||
+			strings.Contains(kw, "meterpreter") || strings.Contains(kw, "ransom") {
 			sev = core.SevHigh
 		}
-		r.Add(core.Finding{Tool: "memoryx", Severity: sev, Title: "Keyword: " + kw, Evidence: map[string]any{"count": n}})
+		r.Add(core.Finding{Tool: "memoryx", Severity: sev,
+			Title: "Keyword: " + kw, Evidence: map[string]any{"count": n}})
 	}
 	if iocs.PEHits > 0 {
-		r.Add(core.Finding{Tool: "memoryx", Severity: core.SevMed, Title: "Embedded PE headers", Detail: itoa(iocs.PEHits)})
+		r.Add(core.Finding{Tool: "memoryx", Severity: core.SevMed,
+			Title:  "Embedded PE headers in dump",
+			Detail: intToString(iocs.PEHits)})
 	}
 	if maxEntropy > 7.5 {
-		r.Add(core.Finding{Tool: "memoryx", Severity: core.SevMed, Title: "High-entropy regions", Detail: ftoa(maxEntropy)})
+		r.Add(core.Finding{Tool: "memoryx", Severity: core.SevMed,
+			Title:  "High-entropy regions (packed/encrypted)",
+			Detail: floatToString(maxEntropy)})
 	}
+
 	r.Finish()
 	return r, nil
 }
@@ -186,7 +197,7 @@ func sweep(iocs *IOCSet, data []byte) {
 	}
 	for _, m := range reIPv4.FindAll(data, 200) {
 		s := string(m)
-		if s != "0.0.0.0" && s != "127.0.0.1" && s != "255.255.255.255" {
+		if s != "0.0.0.0" && s != "255.255.255.255" && s != "127.0.0.1" {
 			iocs.IPv4[s]++
 		}
 	}
@@ -228,13 +239,8 @@ func roundf(f float64, p int) float64 {
 	m := math.Pow(10, float64(p))
 	return math.Round(f*m) / m
 }
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-func itoa(n int) string {
+
+func intToString(n int) string {
 	if n == 0 {
 		return "0"
 	}
@@ -247,4 +253,34 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
-func ftoa(f float64) string { return itoa(int(f*1000)) + "/1000" }
+
+func floatToString(f float64) string {
+	return strings.TrimRight(strings.TrimRight(strings.Replace(
+		formatFloat(f), ",", "", -1), "0"), ".")
+}
+
+func formatFloat(f float64) string {
+	return strings.TrimSpace(itoa64(int64(f * 10000)))
+}
+
+func itoa64(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		b[i] = '-'
+	}
+	return string(b[i:])
+}

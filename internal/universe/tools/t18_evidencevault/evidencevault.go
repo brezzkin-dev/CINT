@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 var vaultLock sync.Mutex

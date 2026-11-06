@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 type Node struct {
@@ -34,9 +34,9 @@ var (
 
 func Run(inputs []string, format, outPath string) (*core.Result, error) {
 	r := core.NewResult("intelgraph", strings.Join(inputs, ","))
+
 	nodes := map[string]*Node{}
 	edges := map[string]*Edge{}
-
 	addNode := func(id, typ string, attrs map[string]string) {
 		if _, ok := nodes[id]; !ok {
 			nodes[id] = &Node{ID: id, Type: typ, Attrs: attrs}
@@ -94,7 +94,9 @@ func Run(inputs []string, format, outPath string) (*core.Result, error) {
 		r.AddExtra("output", outPath)
 	}
 	r.Add(core.Finding{Tool: "intelgraph", Severity: core.SevInfo,
-		Title: fmt.Sprintf("Graph: %d nodes, %d edges", len(nodes), len(edges)), Detail: outPath})
+		Title:  fmt.Sprintf("Graph: %d nodes, %d edges", len(nodes), len(edges)),
+		Detail: outPath})
+
 	r.Finish()
 	return r, nil
 }
@@ -127,7 +129,7 @@ func scanString(report, parent string, v any, addNode func(string, string, map[s
 		}
 		for _, m := range reHash.FindAllString(x, -1) {
 			addNode(strings.ToLower(m), "hash", nil)
-			addEdge(report, strings.ToLower(m), "mentions")
+			addEdge(report, m, "mentions")
 		}
 		for _, m := range reDomain.FindAllString(x, -1) {
 			if strings.Contains(m, "://") || strings.Contains(m, "@") {
@@ -154,7 +156,10 @@ func scanString(report, parent string, v any, addNode func(string, string, map[s
 }
 
 func isLikelyDomain(s string) bool {
-	if strings.ContainsAny(s, "/\\:") || !strings.Contains(s, ".") {
+	if strings.ContainsAny(s, "/\\:") {
+		return false
+	}
+	if !strings.Contains(s, ".") {
 		return false
 	}
 	onlyDigitsDots := true
@@ -173,7 +178,10 @@ func isLikelyDomain(s string) bool {
 
 func writeDOTFile(path string, nodes map[string]*Node, edges map[string]*Edge) {
 	var b strings.Builder
-	b.WriteString("digraph intel {\n  rankdir=LR;\n  node [shape=box, style=rounded];\n")
+	b.WriteString("digraph intel {\n")
+	b.WriteString("  rankdir=LR;\n")
+	b.WriteString("  node [shape=box, style=rounded, fontname=\"Helvetica\"];\n")
+
 	colorFor := func(t string) string {
 		switch t {
 		case "ip":
@@ -191,25 +199,30 @@ func writeDOTFile(path string, nodes map[string]*Node, edges map[string]*Edge) {
 		}
 		return "#bdc3c7"
 	}
-	ids := make([]string, 0, len(nodes))
+
+	nodeIDs := make([]string, 0, len(nodes))
 	for id := range nodes {
-		ids = append(ids, id)
+		nodeIDs = append(nodeIDs, id)
 	}
-	sort.Strings(ids)
-	for _, id := range ids {
+	sort.Strings(nodeIDs)
+	for _, id := range nodeIDs {
 		n := nodes[id]
-		fmt.Fprintf(&b, "  \"%s\" [fillcolor=\"%s\", style=\"rounded,filled\"];\n", escapeDOT(id), colorFor(n.Type))
+		fmt.Fprintf(&b, "  \"%s\" [fillcolor=\"%s\", style=\"rounded,filled\"];\n",
+			escapeDOT(id), colorFor(n.Type))
 	}
-	keys := make([]string, 0, len(edges))
+
+	edgeKeys := make([]string, 0, len(edges))
 	for k := range edges {
-		keys = append(keys, k)
+		edgeKeys = append(edgeKeys, k)
 	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	sort.Strings(edgeKeys)
+	for _, k := range edgeKeys {
 		e := edges[k]
-		fmt.Fprintf(&b, "  \"%s\" -> \"%s\" [label=\"%s\"];\n", escapeDOT(e.From), escapeDOT(e.To), escapeDOT(e.Rel))
+		fmt.Fprintf(&b, "  \"%s\" -> \"%s\" [label=\"%s\"];\n",
+			escapeDOT(e.From), escapeDOT(e.To), escapeDOT(e.Rel))
 	}
 	b.WriteString("}\n")
+
 	if path == "" {
 		fmt.Print(b.String())
 		return
@@ -228,6 +241,12 @@ func writeJSONFile(path string, nodes map[string]*Node, edges map[string]*Edge) 
 	for _, e := range edges {
 		edgeList = append(edgeList, e)
 	}
+	sort.Slice(edgeList, func(i, j int) bool {
+		if edgeList[i].From != edgeList[j].From {
+			return edgeList[i].From < edgeList[j].From
+		}
+		return edgeList[i].To < edgeList[j].To
+	})
 	out := map[string]any{"nodes": nodeList, "edges": edgeList}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	if path == "" {
@@ -258,12 +277,12 @@ func writeTextFile(path string, nodes map[string]*Node, edges map[string]*Edge) 
 		}
 	}
 	b.WriteString("\n[edges]\n")
-	keys := make([]string, 0, len(edges))
+	edgeKeys := make([]string, 0, len(edges))
 	for k := range edges {
-		keys = append(keys, k)
+		edgeKeys = append(edgeKeys, k)
 	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	sort.Strings(edgeKeys)
+	for _, k := range edgeKeys {
 		e := edges[k]
 		fmt.Fprintf(&b, "  %s -[%s]-> %s\n", e.From, e.Rel, e.To)
 	}

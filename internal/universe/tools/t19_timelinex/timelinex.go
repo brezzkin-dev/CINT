@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	core "github.com/ollie/phantomfs/internal/universe/core"
+	core "github.com/brezzkin-dev/CINT/internal/universe/core"
 )
 
 type Options struct {
@@ -22,32 +21,29 @@ type Options struct {
 }
 
 type Event struct {
-	TS     time.Time `json:"ts"`
+	TS     time.Time `json:"-"`
+	TSStr  string    `json:"ts"`
 	Source string    `json:"source"`
 	Kind   string    `json:"kind"`
 	Msg    string    `json:"msg"`
 	Extra  string    `json:"extra,omitempty"`
 }
 
-var reSyslog = regexp.MustCompile(`^(\w{3}\s+\d+\s+\d+:\d+:\d+)\s+(\S+)\s+(\S+):\s+(.*)$`)
+var reSyslog = regexp.MustCompile(`^(\w{3}\s+\d+\s+\d+:\d+:\d+)\s+(\S+)\s+([\w\-\.\/\[\]]+):\s+(.*)$`)
 
 func Run(opts Options) (*core.Result, error) {
 	r := core.NewResult("timelinex", strings.Join(opts.Inputs, ","))
-	var events []Event
-	seen := map[string]bool{}
 
-	var fromT, toT time.Time
-	var hasFrom, hasTo bool
+	var from, to time.Time
 	if opts.From != "" {
-		if t, err := time.Parse(time.RFC3339, opts.From); err == nil {
-			fromT, hasFrom = t, true
-		}
+		from, _ = time.Parse(time.RFC3339, opts.From)
 	}
 	if opts.To != "" {
-		if t, err := time.Parse(time.RFC3339, opts.To); err == nil {
-			toT, hasTo = t, true
-		}
+		to, _ = time.Parse(time.RFC3339, opts.To)
 	}
+
+	var events []Event
+	seen := map[string]bool{}
 
 	for _, in := range opts.Inputs {
 		info, err := os.Stat(in)
@@ -56,77 +52,89 @@ func Run(opts Options) (*core.Result, error) {
 			continue
 		}
 		if info.IsDir() {
-			filepath.Walk(in, func(p string, fi os.FileInfo, err error) error {
-				if err != nil || fi.IsDir() {
-					return nil
-				}
-				ingestFile(p, &events, seen)
-				return nil
-			})
+			walkDir(in, &events, seen)
 		} else {
-			ingestFile(in, &events, seen)
+			parseFile(in, &events, seen)
 		}
 	}
 
-	// Filter
-	var filtered []Event
-	for _, e := range events {
-		if hasFrom && e.TS.Before(fromT) {
-			continue
+	if !from.IsZero() || !to.IsZero() {
+		var filtered []Event
+		for _, e := range events {
+			if !from.IsZero() && e.TS.Before(from) {
+				continue
+			}
+			if !to.IsZero() && e.TS.After(to) {
+				continue
+			}
+			filtered = append(filtered, e)
 		}
-		if hasTo && e.TS.After(toT) {
-			continue
-		}
-		filtered = append(filtered, e)
+		events = filtered
 	}
-	sort.Slice(filtered, func(i, j int) bool { return filtered[i].TS.Before(filtered[j].TS) })
 
-	r.AddExtra("timeline", filtered)
-	r.AddExtra("event_count", len(filtered))
-	r.Add(core.Finding{Tool: "timelinex", Severity: core.SevInfo,
-		Title: fmt.Sprintf("%d events", len(filtered))})
+	sort.Slice(events, func(i, j int) bool { return events[i].TS.Before(events[j].TS) })
+
+	for i := range events {
+		events[i].TSStr = events[i].TS.UTC().Format(time.RFC3339)
+	}
+
+	r.AddExtra("event_count", len(events))
+	r.AddExtra("timeline", events)
+
+	if len(events) > 0 {
+		r.AddExtra("first", events[0].TSStr)
+		r.AddExtra("last", events[len(events)-1].TSStr)
+		r.Add(core.Finding{Tool: "timelinex", Severity: core.SevInfo,
+			Title: "Timeline built",
+			Detail: intToString(len(events)) + " events · " +
+				events[0].TSStr + " → " + events[len(events)-1].TSStr,
+		})
+	}
+
 	r.Finish()
 	return r, nil
 }
 
-func ingestFile(path string, events *[]Event, seen map[string]bool) {
+func walkDir(root string, events *[]Event, seen map[string]bool) {
+	filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		key := "fs:" + p + ":" + info.ModTime().Format(time.RFC3339)
+		if seen[key] {
+			return nil
+		}
+		seen[key] = true
+		*events = append(*events, Event{
+			TS:     info.ModTime(),
+			Source: "filesystem",
+			Kind:   "file_mtime",
+			Msg:    p,
+			Extra:  intToString(int(info.Size())) + " bytes",
+		})
+		return nil
+	})
+}
+
+func parseFile(path string, events *[]Event, seen map[string]bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return
 	}
 
-	// JSON array
 	var jsonArr []map[string]any
 	if json.Unmarshal(data, &jsonArr) == nil && len(jsonArr) > 0 {
 		parseJSONEvents(jsonArr, path, events, seen)
 		return
 	}
 
-	// Single JSON object with findings
-	var single map[string]any
-	if json.Unmarshal(data, &single) == nil {
-		if findings, ok := single["findings"].([]any); ok {
-			var arr []map[string]any
-			for _, f := range findings {
-				if m, ok := f.(map[string]any); ok {
-					arr = append(arr, m)
-				}
-			}
-			// Also use start_time as event
-			if st, ok := single["start_time"].(string); ok {
-				if t, err := time.Parse(time.RFC3339, st); err == nil {
-					tool, _ := single["tool"].(string)
-					*events = append(*events, Event{TS: t, Source: path, Kind: "report", Msg: tool})
-				}
-			}
-			parseJSONEvents(arr, path, events, seen)
-			return
-		}
-	}
-
-	// JSONL
-	lines := strings.Split(string(data), "\n")
+	sc := bufio.NewScanner(strings.NewReader(string(data)))
+	sc.Buffer(make([]byte, 4096), 16<<20)
 	jsonl := false
+	var lines []string
+	for sc.Scan() {
+		lines = append(lines, sc.Text())
+	}
 	for _, l := range lines {
 		var m map[string]any
 		if json.Unmarshal([]byte(l), &m) == nil && (m["ts"] != nil || m["time"] != nil) {
@@ -146,14 +154,12 @@ func ingestFile(path string, events *[]Event, seen map[string]bool) {
 		return
 	}
 
-	// wtmp
 	if strings.HasSuffix(path, "wtmp") || looksBinary(data) {
 		if parseWtmp(data, path, events, seen) {
 			return
 		}
 	}
 
-	// syslog
 	parseSyslog(lines, path, events, seen)
 }
 
@@ -206,7 +212,7 @@ func parseSyslog(lines []string, source string, events *[]Event, seen map[string
 			continue
 		}
 		ts, err := time.Parse("Jan 2 15:04:05 2006",
-			strings.Join(strings.Fields(m[1]), " ")+" "+itoa(year))
+			strings.Join(strings.Fields(m[1]), " ")+" "+intToString(year))
 		if err != nil {
 			continue
 		}
@@ -216,7 +222,8 @@ func parseSyslog(lines []string, source string, events *[]Event, seen map[string
 		}
 		seen[key] = true
 		*events = append(*events, Event{
-			TS: ts, Source: source, Kind: "syslog", Msg: m[4], Extra: m[2] + " " + m[3],
+			TS: ts, Source: source, Kind: "syslog",
+			Msg: m[4], Extra: m[2] + " " + m[3],
 		})
 	}
 }
@@ -228,15 +235,15 @@ func parseWtmp(data []byte, source string, events *[]Event, seen map[string]bool
 	}
 	parsed := 0
 	for i := 0; i+rec <= len(data); i += rec {
-		rec_ := data[i : i+rec]
-		utType := int16(binary.LittleEndian.Uint16(rec_[0:2]))
-		ts := int32(binary.LittleEndian.Uint32(rec_[340:344]))
+		recData := data[i : i+rec]
+		utType := int16(binary.LittleEndian.Uint16(recData[0:2]))
+		ts := int32(binary.LittleEndian.Uint32(recData[340:344]))
 		if ts <= 0 {
 			continue
 		}
-		user := cstr(rec_[44:76])
-		line := cstr(rec_[8:40])
-		host := cstr(rec_[76:332])
+		user := cstr(recData[44:76])
+		line := cstr(recData[8:40])
+		host := cstr(recData[76:332])
 		kind := "wtmp"
 		switch utType {
 		case 7:
@@ -253,7 +260,8 @@ func parseWtmp(data []byte, source string, events *[]Event, seen map[string]bool
 		}
 		seen[key] = true
 		*events = append(*events, Event{
-			TS: t, Source: source, Kind: kind, Msg: user + " tty=" + line, Extra: host,
+			TS: t, Source: source, Kind: kind,
+			Msg: user + " tty=" + line, Extra: host,
 		})
 		parsed++
 	}
@@ -265,11 +273,7 @@ func looksBinary(data []byte) bool {
 		return false
 	}
 	zeros := 0
-	n := 64
-	if len(data) < n {
-		n = len(data)
-	}
-	for _, c := range data[:n] {
+	for _, c := range data[:minInt(64, len(data))] {
 		if c == 0 {
 			zeros++
 		}
@@ -286,7 +290,14 @@ func cstr(b []byte) string {
 	return string(b)
 }
 
-func itoa(n int) string {
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func intToString(n int) string {
 	if n == 0 {
 		return "0"
 	}
@@ -299,5 +310,3 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
-
-var _ = bufio.NewReader
